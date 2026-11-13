@@ -10,7 +10,7 @@ import { claudeClient, hfClient, openrouterClient, zaiClient } from '../clients.
 import { excludedModelReason, isQualifiedFor, type ModelRole, presetById } from '../model-presets.ts';
 import { providerCircuitKey } from '../provider-circuit.ts';
 import type { BenchChain } from '../provider-eligibility.ts';
-import type { ProviderId } from '../provider-ids.ts';
+import { prioritizeProviders, type ProviderId } from '../provider-ids.ts';
 import { aiLogger } from './logger.ts';
 import { type ProviderSlot, streamingSlot } from './slot.ts';
 
@@ -77,7 +77,7 @@ function buildChain(
   const wasChosen = chain.fromEnv;
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
-    for (const provider of ids) {
+    for (const provider of prioritizeProviders(ids, (provider) => provider)) {
       const { model, apiKey, baseUrl } = available[provider];
       if (!model || !apiKey) {
         logOnce(`skip:${kind}:${provider}:${!!model}:${!!apiKey}`, () => {
@@ -251,7 +251,7 @@ export function buildRoleChain(role: ModelRole, cfg: EnvConfig): ProviderSlot[] 
       ...accountCircuitKeyFor(entry.provider, account.baseUrl ?? '', account.apiKey),
     });
   }
-  return slots;
+  return prioritizeProviders(slots, (slot) => slot.provider);
 }
 
 /**

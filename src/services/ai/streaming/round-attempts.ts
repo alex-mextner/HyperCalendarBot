@@ -12,6 +12,7 @@ import {
 import { type Admission, admitProvider, type CircuitContext, settleAnswered } from '../provider-circuit.ts';
 import { withinProviderDeadline } from '../provider-deadline.ts';
 import { clearBlock, isBlocked } from '../provider-eligibility.ts';
+import { prioritizeProviders } from '../provider-ids.ts';
 import { roleForPurpose, rolesApplyTo } from '../role-routing.ts';
 import { classifyProviderError } from '../usage-classification.ts';
 import { type AttemptScope, answeredAttempt, failedAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
@@ -104,7 +105,8 @@ export function buildRoundChain(options: StreamRoundOptions): ProviderSlot[] {
   const role = roleForPurpose(options.purpose);
   const roleChain = role && rolesApplyTo(cfg, options.userId) ? buildRoleChain(role, cfg) : [];
   const legacyChain = options.fast ? buildFastChain(cfg) : buildSmartChain(cfg);
-  return roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
+  const combined = roleChain.length > 0 ? [...roleChain, ...withoutModelsOf(roleChain, legacyChain)] : legacyChain;
+  return prioritizeProviders(combined, (slot) => slot.provider);
 }
 
 function recordSkips(

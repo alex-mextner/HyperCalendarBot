@@ -227,32 +227,32 @@ function ask() {
 describe('aiStreamRound — one broken provider never kills the chain', () => {
   beforeEach(() => {
     resetModelRegistry();
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from HF' }] });
   });
 
-  test('regression: 404 model_not_found does not abort — Claude still answers', async () => {
-    // 2026-09-01 outage: z.ai out of quota, another provider deleted the model, and the 404
-    // propagated out of aiStreamRound, so healthy Claude was never tried.
+  test('regression: 404 model_not_found does not abort — HF still answers', async () => {
+    // 2026-09-01 outage: Claude out of quota, another provider deleted the model, and the 404
+    // propagated out of aiStreamRound, so healthy HF was never tried.
     const result = await ask();
 
-    expect(result.text).toBe('answer from Claude');
-    expect(result.providerUsed).toContain('Claude');
-    expect(hf.requestedModels).toEqual(['hf-main']);
+    expect(result.text).toBe('answer from HF');
+    expect(result.providerUsed).toContain('HF');
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
   });
 
   test('401 and 403 fall through instead of aborting the chain', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(403, 'Forbidden') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(403, 'Forbidden') }] });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Claude');
+    expect(result.text).toBe('answer from HF');
   });
 
   test('every slot failing throws AllProvidersFailedError naming each provider and reason', async () => {
-    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'claude overloaded') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'hf overloaded') }] });
 
     const error = await ask().then(
       () => null,
@@ -263,20 +263,20 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
 
     expect(error.failures.map((f) => f.status)).toEqual([429, 404, 500]);
-    expect(error.failures.map((f) => f.provider)).toEqual(['z.ai (glm-5.1)', 'HF (hf-main)', 'Claude (claude-main)']);
+    expect(error.failures.map((f) => f.provider)).toEqual(['Claude (claude-main)', 'z.ai (glm-5.1)', 'HF (hf-main)']);
     expect(error.failures[0]?.message).toContain('Weekly/Monthly Limit Exhausted');
-    expect(error.failures[2]?.message).toContain('claude overloaded');
+    expect(error.failures[2]?.message).toContain('hf overloaded');
     // The aggregate message alone must be enough to diagnose the outage.
+    expect(error.message).toContain('z.ai (glm-5.1)');
     expect(error.message).toContain('HF (hf-main)');
-    expect(error.message).toContain('Claude (claude-main)');
   });
 
   test('partial text from a dying provider is discarded and the next provider answers', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('connection closed') }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
-    // z.ai emits a delta before dying: simulate by scripting a stream that throws mid-iteration.
-    zai.client.chat.completions.create = async (params: { model: string }) => {
-      zai.requestedModels.push(params.model);
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('connection closed') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: MODEL_GONE }] });
+    // Claude emits a delta before dying: simulate by scripting a stream that throws mid-iteration.
+    claude.client.chat.completions.create = async (params: { model: string }) => {
+      claude.requestedModels.push(params.model);
       async function* gen(): AsyncGenerator<StreamChunk> {
         yield { choices: [{ delta: { content: 'partial ' }, finish_reason: null }] };
         throw new Error('connection closed mid-stream');
@@ -296,8 +296,8 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
       },
     );
 
-    expect(result.text).toBe('answer from Claude');
-    expect(deltas).toEqual(['partial ', 'answer from Claude']);
+    expect(result.text).toBe('answer from HF');
+    expect(deltas).toEqual(['partial ', 'answer from HF']);
     expect(switched).toBe(1);
   });
 
@@ -305,8 +305,8 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     // The caller shows a "running <tool>" label as soon as onToolCallStart fires
     // (agent.ts: writer.setToolLabel). If that provider then dies, the label
     // belongs to a round that never happened and must be cleared like text is.
-    zai.client.chat.completions.create = async (params: { model: string }) => {
-      zai.requestedModels.push(params.model);
+    claude.client.chat.completions.create = async (params: { model: string }) => {
+      claude.requestedModels.push(params.model);
       async function* gen(): AsyncGenerator<StreamChunk> {
         yield {
           choices: [
@@ -334,20 +334,20 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     );
 
     expect(toolLabels).toEqual(['get_events']);
-    expect(result.text).toBe('answer from Claude');
+    expect(result.text).toBe('answer from HF');
     expect(switched).toBe(1);
   });
 
   test('a caller-initiated abort propagates instead of burning the whole chain', async () => {
     const controller = new AbortController();
     controller.abort();
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'irrelevant') }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'irrelevant') }] });
 
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' });
 
-    expect(hf.requestedModels).toEqual([]);
+    expect(zai.requestedModels).toEqual([]);
   });
 
   test('an exhausted caller deadline cannot start another provider', async () => {
@@ -356,7 +356,7 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     await expect(aiStreamRound({ messages: [], maxTokens: 100, signal })).rejects.toMatchObject({
       name: 'TimeoutError',
     });
-    expect(claude.requestedModels).toEqual([]);
+    expect(hf.requestedModels).toEqual([]);
   });
 });
 
@@ -370,44 +370,44 @@ describe('benching a provider that said it is out', () => {
     resetProviderAlertState();
   });
 
-  // The waste this exists to remove: z.ai answered 429 to every request for a
+  // The waste this exists to remove: Claude answered 429 to every request for a
   // day, and the chain asked it again on every round of every message.
   test('a spent quota is not asked again on the next request', async () => {
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [{ kind: 'throw', error: apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow') }],
     });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
-    hf = unusedProvider();
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    zai = unusedProvider();
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
 
-    expect(zai.requestedModels).toHaveLength(1);
-    expect(claude.requestedModels).toHaveLength(2);
+    expect(claude.requestedModels).toHaveLength(1);
+    expect(hf.requestedModels).toHaveLength(2);
   });
 
   // A provider's tier may not take a request carrying the tool catalog, but the short
   // summaries on the fast chain fit — benching it for everything would throw
   // away the one thing it is still good for.
   test.each([413, 429])('a size rejection %i benches only the requests that carry tools', async (sizeStatus) => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [
         { kind: 'throw', error: apiError(sizeStatus, 'Request too large ... tokens per minute (TPM): Limit 8000') },
-        { kind: 'text', text: 'from hf' },
+        { kind: 'text', text: 'from zai' },
       ],
     });
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
-    process.env.AI_SMART_CHAIN = 'hf,claude';
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    process.env.AI_SMART_CHAIN = 'zai,hf';
 
     const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
     const withTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
-    expect(withTools.text).toBe('from claude');
-    expect(hf.requestedModels).toHaveLength(1);
+    expect(withTools.text).toBe('from hf');
+    expect(zai.requestedModels).toHaveLength(1);
 
     const withoutTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
-    expect(withoutTools.text).toBe('from hf');
+    expect(withoutTools.text).toBe('from zai');
   });
 
   // A provider that reported a spent account is never forced: while every
@@ -415,14 +415,14 @@ describe('benching a provider that said it is out', () => {
   // three guaranteed rejections (this used to be "try them anyway").
   test('a chain where every account is depleted is not forced', async () => {
     const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [
         { kind: 'throw', error: spent },
-        { kind: 'text', text: 'from zai' },
+        { kind: 'text', text: 'from claude' },
       ],
     });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
-    claude = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
     const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(
@@ -434,17 +434,17 @@ describe('benching a provider that said it is out', () => {
     expect(second.failures).toHaveLength(3);
     expect(second.failures.every((f) => f.skippedBeforeRequest === true)).toBe(true);
     expect(second.roundMetrics.attemptCount).toBe(0);
+    expect(claude.requestedModels).toHaveLength(1);
     expect(zai.requestedModels).toHaveLength(1);
-    expect(hf.requestedModels).toHaveLength(1);
   });
 
   // The bench suppresses calls, not observations: a chain that answers nobody
   // must still read as down.
   test('a benched chain still reports the outage', async () => {
     const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
     claude = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
     expect(isAiChainDown()).toBe(true);
@@ -482,7 +482,7 @@ describe('durable provider circuit', () => {
     providerCircuitClock.now = () => clock;
     configureProviderCircuit(statePath);
     startAlertLayer();
-    hf = unusedProvider();
+    zai = unusedProvider();
   });
 
   afterEach(() => {
@@ -491,35 +491,35 @@ describe('durable provider circuit', () => {
   });
 
   test('two providers with different failures are skipped afterwards, one notice each', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(401, 'Invalid API key') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await ask();
     await ask();
     const third = await ask();
 
-    expect(third.text).toBe('from claude');
+    expect(third.text).toBe('from hf');
+    expect(claude.requestedModels).toHaveLength(1);
     expect(zai.requestedModels).toHaveLength(1);
-    expect(hf.requestedModels).toHaveLength(1);
-    expect(claude.requestedModels).toHaveLength(3);
+    expect(hf.requestedModels).toHaveLength(3);
     expect(incidentNotices()).toHaveLength(2);
   });
 
   test('a depleted account is skipped on the OTHER chain too', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true });
     const smart = await ask();
 
-    expect(smart.text).toBe('from claude');
-    expect(zai.requestedModels).toEqual(['glm-5.1-air']);
+    expect(smart.text).toBe('from hf');
+    expect(claude.requestedModels).toEqual(['claude-fast']);
   });
 
   test('a restart does not repeat the notice or re-ask the provider', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     await ask();
     expect(incidentNotices()).toHaveLength(1);
 
@@ -528,30 +528,30 @@ describe('durable provider circuit', () => {
     startAlertLayer();
     await ask();
 
-    expect(zai.requestedModels).toHaveLength(1);
+    expect(claude.requestedModels).toHaveLength(1);
     expect(incidentNotices()).toHaveLength(1);
   });
 
   test('only a successful probe closes the circuit, and the next incident notifies again', async () => {
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [
         { kind: 'throw', error: apiError(402, 'Payment Required') },
-        { kind: 'text', text: 'from zai' },
+        { kind: 'text', text: 'from claude' },
         { kind: 'throw', error: apiError(402, 'Payment Required') },
       ],
     });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await ask();
     clock += 24 * 60 * MINUTE;
     const probe = await ask();
-    expect(probe.text).toBe('from zai');
-    expect(zai.requestedModels).toHaveLength(2);
+    expect(probe.text).toBe('from claude');
+    expect(claude.requestedModels).toHaveLength(2);
 
     clock += 30 * MINUTE;
-    const again = await ask(); // closed now: zai is asked again and fails again
-    expect(again.text).toBe('from claude');
-    expect(zai.requestedModels).toHaveLength(3);
+    const again = await ask(); // closed now: claude is asked again and fails again
+    expect(again.text).toBe('from hf');
+    expect(claude.requestedModels).toHaveLength(3);
     expect(incidentNotices()).toHaveLength(2);
   });
 
@@ -560,13 +560,13 @@ describe('durable provider circuit', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [
         { kind: 'throw', error: apiError(402, 'Payment Required') },
-        { kind: 'hold', gate, text: 'from zai' },
+        { kind: 'hold', gate, text: 'from claude' },
       ],
     });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     await ask();
     clock += 24 * 60 * MINUTE;
 
@@ -575,15 +575,15 @@ describe('durable provider circuit', () => {
     release();
     const texts = (await Promise.all([first, second])).map((r) => r.text).sort();
 
-    expect(texts).toEqual(['from claude', 'from zai']);
-    expect(zai.requestedModels).toHaveLength(2);
+    expect(texts).toEqual(['from claude', 'from hf']);
+    expect(claude.requestedModels).toHaveLength(2);
   });
 
   test('a provider dying mid-stream discards the partial output, opens its circuit and is not replayed', async () => {
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [{ kind: 'partial-then-throw', text: 'half an ans', error: apiError(402, 'Payment Required') }],
     });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     const events: string[] = [];
     const callbacks = {
       onTextDelta: (text: string) => events.push(`text:${text}`),
@@ -593,78 +593,78 @@ describe('durable provider circuit', () => {
     const first = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
     const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, callbacks);
 
-    expect(first.text).toBe('from claude');
-    expect(second.text).toBe('from claude');
-    expect(events).toEqual(['text:half an ans', 'switch', 'text:from claude', 'text:from claude']);
-    expect(zai.requestedModels).toHaveLength(1);
-    expect(claude.requestedModels).toHaveLength(2);
+    expect(first.text).toBe('from hf');
+    expect(second.text).toBe('from hf');
+    expect(events).toEqual(['text:half an ans', 'switch', 'text:from hf', 'text:from hf']);
+    expect(claude.requestedModels).toHaveLength(1);
+    expect(hf.requestedModels).toHaveLength(2);
     expect(incidentNotices()).toHaveLength(1);
   });
 
   test('skipped providers stay visible in telemetry and are not counted as attempts', async () => {
-    process.env.AI_SMART_CHAIN = 'zai,claude';
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    process.env.AI_SMART_CHAIN = 'claude,hf';
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     await ask();
 
     const result = await ask();
 
-    expect(result.metrics?.skippedProviders).toEqual([{ provider: 'zai', model: 'glm-5.1' }]);
+    expect(result.metrics?.skippedProviders).toEqual([{ provider: 'claude', model: 'claude-main' }]);
     expect(result.metrics?.failedProviders).toEqual([]);
     expect(result.metrics?.attemptCount).toBe(1);
   });
 
   test('a caller abort carrying a quota error does not open the circuit', async () => {
-    zai = makeProvider({
-      behaviors: [{ kind: 'text', text: 'from zai' }],
+    claude = makeProvider({
+      behaviors: [{ kind: 'text', text: 'from claude' }],
     });
-    claude = unusedProvider();
+    hf = unusedProvider();
     const controller = new AbortController();
     controller.abort(apiError(402, 'Payment Required'));
-    expect(zai.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual([]);
 
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toBeDefined();
     const next = await ask();
 
-    expect(next.text).toBe('from zai');
+    expect(next.text).toBe('from claude');
     expect(incidentNotices()).toHaveLength(0);
   });
 
   test('a per-request rejection does not poison the provider for unrelated requests', async () => {
-    zai = makeProvider({
+    claude = makeProvider({
       behaviors: [
         { kind: 'throw', error: apiError(400, 'invalid tool schema') },
         { kind: 'throw', error: apiError(413, 'Request too large for this tier') },
-        { kind: 'text', text: 'from zai' },
+        { kind: 'text', text: 'from claude' },
       ],
     });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
     const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
 
     await ask();
     await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools });
     const small = await ask();
 
-    expect(small.text).toBe('from zai');
+    expect(small.text).toBe('from claude');
     expect(incidentNotices()).toHaveLength(0);
   });
 
   test('a rate-limit incident notifies once and is silently skipped afterward', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await ask();
     await ask();
 
     expect(incidentNotices()).toHaveLength(1);
-    expect(zai.requestedModels).toHaveLength(1);
+    expect(claude.requestedModels).toHaveLength(1);
   });
 
   test('the incident notice never contains the provider error body', async () => {
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'from claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(402, 'Payment Required SECRET-BODY-TEXT') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
 
     await ask();
 
@@ -674,27 +674,27 @@ describe('durable provider circuit', () => {
 });
 
 describe('provider order', () => {
-  test('default main route starts with z.ai', async () => {
+  test('default main route starts with Claude', async () => {
     delete process.env.AI_SMART_CHAIN;
-    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'main reply' }] });
-    claude = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'main reply' }] });
+    zai = unusedProvider();
     hf = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
     expect(result.text).toBe('main reply');
     expect(result.metrics?.attemptCount).toBe(1);
-    expect(zai.requestedModels).toEqual(['glm-5.1']);
-    expect(claude.requestedModels).toEqual([]);
+    expect(claude.requestedModels).toEqual(['claude-main']);
+    expect(zai.requestedModels).toEqual([]);
     expect(hf.requestedModels).toEqual([]);
   });
-  test('default main failure falls directly to configured Claude main, not its fast model', async () => {
+  test('default main failure falls directly to configured z.ai main, not its fast model', async () => {
     delete process.env.AI_SMART_CHAIN;
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'unavailable') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'main fallback' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'unavailable') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'main fallback' }] });
     hf = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'synthetic request' }], maxTokens: 256 });
     expect(result.text).toBe('main fallback');
     expect(result.metrics?.attemptCount).toBe(2);
-    expect(claude.requestedModels).toEqual(['claude-main']);
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
     expect(hf.requestedModels).toEqual([]);
   });
 
@@ -712,7 +712,7 @@ describe('provider order', () => {
   // The order is the whole point of the configuration: a provider that answers
   // 429 all week, or whose tier rejects every request of this size, must be
   // routed around without a deploy.
-  test('tries providers in the configured order', async () => {
+  test('keeps Claude first and HF last among configured providers', async () => {
     process.env.AI_SMART_CHAIN = 'claude,hf,zai';
     claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'rate limited') }] });
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
@@ -723,7 +723,7 @@ describe('provider order', () => {
     expect(result.text).toBe('from hf');
     expect(claude.requestedModels).toEqual(['claude-main']);
     expect(hf.requestedModels).toEqual(['hf-main']);
-    expect(zai.requestedModels).toEqual([]);
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
   });
 
   // An order naming only unconfigured providers would leave the bot with
@@ -764,15 +764,15 @@ describe('provider order', () => {
   test.each([
     '',
     '   ',
-  ])('empty first HF response %j falls through to the exact Claude fast model', async (emptyText) => {
-    process.env.AI_FAST_CHAIN = 'hf,claude';
-    hf = makeProvider({ behaviors: [{ kind: 'text', text: emptyText }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'verified fallback' }] });
+  ])('empty first Claude response %j falls through to the exact HF fast model', async (emptyText) => {
+    process.env.AI_FAST_CHAIN = 'claude,hf';
+    claude = makeProvider({ behaviors: [{ kind: 'text', text: emptyText }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'verified fallback' }] });
     zai = unusedProvider();
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 128, fast: true });
     expect(result.text).toBe('verified fallback');
-    expect(hf.requestedModels).toEqual(['hf-fast']);
     expect(claude.requestedModels).toEqual(['claude-fast']);
+    expect(hf.requestedModels).toEqual(['hf-fast']);
     expect(result.metrics?.attemptCount).toBe(2);
     expect(zai.requestedModels).toEqual([]);
   });
@@ -792,12 +792,12 @@ describe('provider order', () => {
     expect(claude.requestedModels).toEqual([]);
   });
 
-  // Claude follows z.ai in both default orders and each chain uses its own
+  // Claude leads both default orders and each chain uses its own
   // Claude model (Sonnet answers users, Haiku validates).
   test.each([
     { fast: false, chain: 'smart', model: 'claude-main' },
     { fast: true, chain: 'fast', model: 'claude-fast' },
-  ])('default $chain chain reaches Claude $model directly after z.ai fails', async ({ fast, chain, model }) => {
+  ])('default $chain chain reaches Claude $model before z.ai is needed', async ({ fast, chain, model }) => {
     delete process.env.AI_SMART_CHAIN;
     delete process.env.AI_FAST_CHAIN;
     zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
@@ -807,8 +807,8 @@ describe('provider order', () => {
 
     expect(result.text).toBe('answer from Claude');
     expect(result.metrics?.chain).toBe(chain);
-    expect(result.metrics?.attemptCount).toBe(2);
-    expect(zai.requestedModels).toHaveLength(1);
+    expect(result.metrics?.attemptCount).toBe(1);
+    expect(zai.requestedModels).toHaveLength(0);
     expect(claude.requestedModels).toEqual([model]);
   });
 
@@ -817,8 +817,8 @@ describe('provider order', () => {
   test('Claude requests omit the sampling temperature that other providers still get', async () => {
     process.env.AI_SMART_CHAIN = 'zai,claude';
     Object.assign(process.env, { CLAUDE_API_TOKEN: 'claude-key', CLAUDE_MODEL: 'claude-main' });
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'synthetic outage') }] });
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
 
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, temperature: 0 });
 
@@ -848,7 +848,7 @@ describe('provider order', () => {
     expect(claude.requests).toMatchObject([{ max_tokens: 128_000 }]);
     expect(claude.requests[0]?.reasoning_effort).toBeUndefined();
     expect(claude.requests[0]?.thinking).toBeUndefined();
-    expect(zai.requests).toMatchObject([{ max_tokens: maxTokens }]);
+    expect(zai.requests).toEqual([]);
   });
 
   // The caller's limit binds Claude's visible output only, so the stream reader enforces it:
@@ -938,35 +938,35 @@ describe('provider order', () => {
 describe('aiStreamRound — auto-detecting a live model', () => {
   beforeEach(() => {
     resetModelRegistry();
-    zai = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
-    claude = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from Claude' }] });
-    hf = unusedProvider();
+    claude = makeProvider({ behaviors: [{ kind: 'throw', error: ZAI_QUOTA }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'answer from HF' }] });
+    zai = unusedProvider();
   });
 
   test('deleted model → /v1/models probed → request retried on the live model and succeeds', async () => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [
         { kind: 'throw', error: MODEL_GONE },
-        { kind: 'text', text: 'answer from HF' },
+        { kind: 'text', text: 'answer from z.ai' },
       ],
       liveModels: ['whisper-large-v3', 'replacement-model'],
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from HF');
-    expect(result.providerUsed).toBe('HF (replacement-model)');
-    expect(hf.requestedModels).toEqual(['hf-main', 'replacement-model']);
-    expect(claude.requestedModels).toEqual([]);
-    expect(result.metrics?.attemptCount).toBe(3); // z.ai quota + dead HF model + replacement HF request
+    expect(result.text).toBe('answer from z.ai');
+    expect(result.providerUsed).toBe('z.ai (replacement-model)');
+    expect(zai.requestedModels).toEqual(['glm-5.1', 'replacement-model']);
+    expect(hf.requestedModels).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(3); // Claude quota + dead z.ai model + replacement z.ai request
     expect(result.metrics?.fallbackCount).toBe(1);
   });
 
   test('the resolved model is cached: the next request skips the dead model and the second probe', async () => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [
         { kind: 'throw', error: MODEL_GONE },
-        { kind: 'text', text: 'answer from HF' },
+        { kind: 'text', text: 'answer from z.ai' },
       ],
       liveModels: ['replacement-model'],
     });
@@ -974,61 +974,61 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     await ask();
     const second = await ask();
 
-    expect(second.text).toBe('answer from HF');
-    expect(hf.requestedModels).toEqual([
-      'hf-main',
+    expect(second.text).toBe('answer from z.ai');
+    expect(zai.requestedModels).toEqual([
+      'glm-5.1',
       'replacement-model',
       'replacement-model', // second request goes straight to the live model
     ]);
-    expect(hf.modelsListCalls).toBe(1);
+    expect(zai.modelsListCalls).toBe(1);
   });
 
   test('discovery failure degrades gracefully to the next provider', async () => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [{ kind: 'throw', error: MODEL_GONE }],
       modelsListError: new Error('models endpoint unreachable'),
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Claude');
-    expect(hf.modelsListCalls).toBe(1);
-    expect(hf.requestedModels).toEqual(['hf-main']);
+    expect(result.text).toBe('answer from HF');
+    expect(zai.modelsListCalls).toBe(1);
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
   });
 
   test('discovery finding nothing usable falls through to the next provider', async () => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [{ kind: 'throw', error: MODEL_GONE }],
       liveModels: ['whisper-large-v3', 'playai-tts'],
     });
 
     const result = await ask();
 
-    expect(result.text).toBe('answer from Claude');
-    expect(hf.requestedModels).toEqual(['hf-main']);
+    expect(result.text).toBe('answer from HF');
+    expect(zai.requestedModels).toEqual(['glm-5.1']);
   });
 
   test('a replacement that also dies triggers one re-probe, then falls through', async () => {
-    hf = makeProvider({
+    zai = makeProvider({
       behaviors: [{ kind: 'throw', error: MODEL_GONE }],
       liveModels: ['replacement-model'],
     });
 
-    await ask(); // caches replacement-model, which also 404s → falls through to Claude
+    await ask(); // caches replacement-model, which also 404s → falls through to HF
     const result = await ask();
 
-    expect(result.text).toBe('answer from Claude');
+    expect(result.text).toBe('answer from HF');
     // First request: dead configured model + retry on the replacement.
     // Second request: straight to the cached replacement, then one forced re-probe.
-    expect(hf.modelsListCalls).toBe(2);
+    expect(zai.modelsListCalls).toBe(2);
 
-    // The re-probe found only the model that just died, so HF is recorded as
+    // The re-probe found only the model that just died, so z.ai is recorded as
     // having nothing usable. Further requests must NOT probe /v1/models again —
     // otherwise a provider whose listing lies costs an extra HTTP round trip on
     // every single user message.
     await ask();
     await ask();
-    expect(hf.modelsListCalls).toBe(2);
+    expect(zai.modelsListCalls).toBe(2);
   });
 });
 
@@ -1152,17 +1152,17 @@ describe('the chain a round runs on reaches the alert layer', () => {
 test('request-specific failure does not trigger an account incident from echoed text', async () => {
   const messages: string[] = [];
   initProviderAlerts({ botToken: 'synthetic', adminId: 1, send: (text) => messages.push(text), schedule: () => {} });
-  process.env.AI_SMART_CHAIN = 'zai,claude';
-  zai = makeProvider({
+  process.env.AI_SMART_CHAIN = 'claude,hf';
+  claude = makeProvider({
     behaviors: [
       { kind: 'throw', error: apiError(400, 'Bad input text contains: payment required') },
       { kind: 'text', text: 'healthy next request' },
     ],
   });
-  claude = makeProvider({ behaviors: [{ kind: 'text', text: 'fallback' }] });
+  hf = makeProvider({ behaviors: [{ kind: 'text', text: 'fallback' }] });
   const options = { messages: [{ role: 'user' as const, content: 'synthetic' }], maxTokens: 80 };
   expect((await aiStreamRound(options)).text).toBe('fallback');
   expect((await aiStreamRound(options)).text).toBe('healthy next request');
-  expect(zai.requestedModels).toHaveLength(2);
+  expect(claude.requestedModels).toHaveLength(2);
   expect(messages).toHaveLength(0);
 });

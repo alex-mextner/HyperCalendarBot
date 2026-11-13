@@ -140,8 +140,8 @@ const { AllProvidersFailedError, aiStreamRound, _resetStreamingUsageCompatibilit
 describe('aiStreamRound — provider chain fallback', () => {
   beforeEach(() => {
     _resetStreamingUsageCompatibilityForTest();
-    fakeZai = undefined;
     fakeClaude = undefined;
+    fakeZai = undefined;
     fakeHf = undefined;
   });
 
@@ -184,16 +184,16 @@ describe('aiStreamRound — provider chain fallback', () => {
     '[]',
     'null',
   ])('invalid or non-object tool arguments cannot become executable output: %s', async (args) => {
-    process.env.AI_SMART_CHAIN = 'claude';
-    fakeClaude = buildFakeClient([{ kind: 'tool', id: 'bad-args', name: 'calculate', args }]);
+    process.env.AI_SMART_CHAIN = 'zai';
+    fakeZai = buildFakeClient([{ kind: 'tool', id: 'bad-args', name: 'calculate', args }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'malformed_tools' } }],
     });
   });
 
   test('orphan argument fragments are diagnosed as malformed tool output', async () => {
-    process.env.AI_SMART_CHAIN = 'claude';
-    fakeClaude = {
+    process.env.AI_SMART_CHAIN = 'zai';
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () =>
@@ -210,8 +210,8 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
 
   test('an incomplete tool declaration is not accepted as usable output', async () => {
-    process.env.AI_SMART_CHAIN = 'claude';
-    fakeClaude = buildFakeClient([{ kind: 'tool', id: 'incomplete', name: '', args: '{}' }]);
+    process.env.AI_SMART_CHAIN = 'zai';
+    fakeZai = buildFakeClient([{ kind: 'tool', id: 'incomplete', name: '', args: '{}' }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'malformed_tools', toolFragmentCount: 1, choiceCount: 1 } }],
     });
@@ -231,7 +231,7 @@ describe('aiStreamRound — provider chain fallback', () => {
 
   test('aborting a stalled iterator requests closure without awaiting a stuck return', async () => {
     const close = mock(() => new Promise<IteratorResult<OpenAI.ChatCompletionChunk>>(() => {}));
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => ({
@@ -242,7 +242,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([{ kind: 'text', text: 'fallback after cleanup' }]);
+    fakeZai = buildFakeClient([{ kind: 'text', text: 'fallback after cleanup' }]);
     const started = performance.now();
     const result = await aiStreamRound({ messages: [], maxTokens: 128, providerTimeoutMs: 20 });
     expect(result.text).toBe('fallback after cleanup');
@@ -251,7 +251,7 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
 
   test('retains a terminal finish reason without a delta', async () => {
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () =>
@@ -307,7 +307,7 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
   test('a stalled response body times out and a healthy fallback finishes the same round', async () => {
     let firstSignal: AbortSignal | undefined;
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async (_params: unknown, opts: { signal: AbortSignal }) => {
@@ -320,7 +320,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([{ kind: 'text', text: 'fallback ready' }]);
+    fakeZai = buildFakeClient([{ kind: 'text', text: 'fallback ready' }]);
     const visible: string[] = [];
     const result = await aiStreamRound(
       { messages: [{ role: 'user', content: 'synthetic' }], maxTokens: 128, providerTimeoutMs: 20 },
@@ -334,16 +334,16 @@ describe('aiStreamRound — provider chain fallback', () => {
   test('a completed shared deadline starts no provider request', async () => {
     const signal = AbortSignal.timeout(1);
     await Bun.sleep(5);
-    fakeZai = buildFakeClient([{ kind: 'text', text: 'should not run' }]);
+    fakeClaude = buildFakeClient([{ kind: 'text', text: 'should not run' }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128, signal })).rejects.toThrow();
-    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
   });
-  test('returns z.ai result on first success', async () => {
-    fakeZai = buildFakeClient([
-      { kind: 'text', text: 'hello from z.ai' },
+  test('returns Claude result on first success', async () => {
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'hello from Claude' },
       { kind: 'finish', reason: 'stop' },
     ]);
-    fakeClaude = buildFakeClient(() => {
+    fakeZai = buildFakeClient(() => {
       throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
@@ -355,14 +355,14 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('hello from z.ai');
-    expect(result.providerUsed).toContain('z.ai');
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
-    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
+    expect(result.text).toBe('hello from Claude');
+    expect(result.providerUsed).toContain('Claude');
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('captures terminal usage-only chunk and requests streaming usage', async () => {
-    fakeZai = buildFakeClient([
+    fakeClaude = buildFakeClient([
       { kind: 'text', text: 'measured' },
       { kind: 'finish', reason: 'stop' },
       { kind: 'usage', prompt: 120, completion: 30, cached: 40, reasoning: 7 },
@@ -376,12 +376,12 @@ describe('aiStreamRound — provider chain fallback', () => {
       reasoningTokens: 7,
     });
     expect(result.metrics?.firstUsableSinceAttemptMs).toBeNumber();
-    expect(fakeZai.chat.completions.create.mock.calls[0]?.[0]?.stream_options).toEqual({ include_usage: true });
+    expect(fakeClaude.chat.completions.create.mock.calls[0]?.[0]?.stream_options).toEqual({ include_usage: true });
   });
 
   test('retries same provider without usage telemetry when compatibility rejects stream_options', async () => {
     let calls = 0;
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async (params: { stream_options?: unknown }) => {
@@ -412,12 +412,12 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(second.text).toBe('compat');
     expect(calls).toBe(3);
     expect(second.metrics?.attemptCount).toBe(1);
-    expect(fakeZai.chat.completions.create.mock.calls[2]?.[0]?.stream_options).toBeUndefined();
+    expect(fakeClaude.chat.completions.create.mock.calls[2]?.[0]?.stream_options).toBeUndefined();
   });
 
-  test('falls through to Claude on z.ai 500', async () => {
+  test('falls through to z.ai on Claude 500', async () => {
     const apiError = new OpenAI.APIError(500, { error: { message: 'overloaded' } }, 'server error', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -426,8 +426,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
-      { kind: 'text', text: 'hello from Claude' },
+    fakeZai = buildFakeClient([
+      { kind: 'text', text: 'hello from z.ai' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -439,17 +439,17 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('hello from Claude');
-    expect(result.providerUsed).toContain('Claude');
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('hello from z.ai');
+    expect(result.providerUsed).toContain('z.ai');
     expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
-  test('falls through on EmptyProviderResponseError (z.ai coding endpoint quirk)', async () => {
-    // z.ai returns 200 OK but no text and no tool calls — streaming adapter
-    // should throw EmptyProviderResponseError and chain should try Claude.
-    fakeZai = buildFakeClient([{ kind: 'finish', reason: 'stop' }]);
-    fakeClaude = buildFakeClient([
+  test('falls through on EmptyProviderResponseError (empty primary response)', async () => {
+    // Claude returns 200 OK but no text and no tool calls — streaming adapter
+    // should throw EmptyProviderResponseError and chain should try z.ai.
+    fakeClaude = buildFakeClient([{ kind: 'finish', reason: 'stop' }]);
+    fakeZai = buildFakeClient([
       { kind: 'text', text: 'claude to the rescue' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -463,15 +463,15 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
 
     expect(result.text).toBe('claude to the rescue');
-    expect(result.metrics).toMatchObject({ failedProviders: [{ provider: 'zai', model: 'zai-main' }] });
-    expect(result.providerUsed).toContain('Claude');
+    expect(result.metrics).toMatchObject({ failedProviders: [{ provider: 'claude', model: 'claude-main' }] });
+    expect(result.providerUsed).toContain('z.ai');
   });
 
   test('all three providers fail → throws an aggregate naming every provider', async () => {
     const err500 = new OpenAI.APIError(500, { error: { message: 'boom' } }, 'boom', new Headers());
     const err503 = new OpenAI.APIError(503, { error: { message: 'down' } }, 'down', new Headers());
     const err504 = new OpenAI.APIError(504, { error: { message: 'gateway' } }, 'gateway', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -480,7 +480,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = {
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -519,7 +519,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     // (bad tool template, unsupported parameter). Another provider still can, so
     // the chain must continue — treating it as fatal took the bot down on 2026-09-01.
     const badRequest = new OpenAI.APIError(400, { error: { message: 'bad input' } }, 'bad input', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -528,7 +528,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
+    fakeZai = buildFakeClient([
       { kind: 'text', text: 'claude answered anyway' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -542,13 +542,13 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
 
     expect(result.text).toBe('claude answered anyway');
-    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('400 with no body falls through to next provider', async () => {
     // Providers sometimes return 400 with no body for transient issues — treat as retryable.
     const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -557,7 +557,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
+    fakeZai = buildFakeClient([
       { kind: 'text', text: 'claude picked up' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -571,7 +571,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
 
     expect(result.text).toBe('claude picked up');
-    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('400 with no body is retried once on the same provider before falling through', async () => {
@@ -582,7 +582,7 @@ describe('aiStreamRound — provider chain fallback', () => {
       { kind: 'finish', reason: 'stop' },
     ]);
     let calls = 0;
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async (...args: unknown[]) => {
@@ -593,7 +593,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient(() => {
+    fakeZai = buildFakeClient(() => {
       throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
@@ -607,12 +607,12 @@ describe('aiStreamRound — provider chain fallback', () => {
 
     expect(result.text).toBe('zai recovered');
     expect(calls).toBe(2);
-    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('retries a second empty 400 only once, then falls through', async () => {
     const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -621,7 +621,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
+    fakeZai = buildFakeClient([
       { kind: 'text', text: 'claude fallback' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -630,17 +630,17 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
     expect(result.text).toBe('claude fallback');
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(2);
-    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(2);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
     expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
-    expect(result.metrics?.attemptCount).toBe(3); // z.ai twice + Claude once
+    expect(result.metrics?.attemptCount).toBe(3); // Claude twice + z.ai once
   });
 
   test('caller abort never triggers the empty-400 retry', async () => {
     const controller = new AbortController();
     controller.abort();
     const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -649,7 +649,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient(() => {
+    fakeZai = buildFakeClient(() => {
       throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
@@ -658,8 +658,8 @@ describe('aiStreamRound — provider chain fallback', () => {
     await expect(
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toThrow();
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(0);
-    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(0);
+    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
     expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
   });
 
@@ -670,7 +670,7 @@ describe('aiStreamRound — provider chain fallback', () => {
       '400 no body mentioned',
       new Headers(),
     );
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -679,7 +679,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
+    fakeZai = buildFakeClient([
       { kind: 'text', text: 'normal fallback' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -688,15 +688,15 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
     expect(result.text).toBe('normal fallback');
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
     expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('mid-stream failure after text emitted discards the partial text and falls through', async () => {
-    // z.ai starts streaming, then the iterator throws. The partial text already
+    // Claude starts streaming, then the iterator throws. The partial text already
     // shown to the user is discarded via onProviderSwitch and the next provider
     // answers from scratch — a half-sent sentence is not a reason to fail the turn.
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -709,8 +709,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient([
-      { kind: 'text', text: 'full answer from Claude' },
+    fakeZai = buildFakeClient([
+      { kind: 'text', text: 'full answer from z.ai' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -732,15 +732,15 @@ describe('aiStreamRound — provider chain fallback', () => {
       },
     );
 
-    expect(result.text).toBe('full answer from Claude');
-    expect(deltas).toEqual(['partial ', 'full answer from Claude']);
+    expect(result.text).toBe('full answer from z.ai');
+    expect(deltas).toEqual(['partial ', 'full answer from z.ai']);
     expect(switched).toBe(1);
   });
 
   test('aggregates tool_calls across chunks even when provider omits index field', async () => {
     // HF Router historical bug: tool_call deltas arrive without `index`.
     // Without a fallback the Map collapses both chunks into the same slot.
-    fakeZai = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -773,7 +773,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeClaude = buildFakeClient(() => {
+    fakeZai = buildFakeClient(() => {
       throw new Error('unreachable');
     });
     fakeHf = buildFakeClient(() => {

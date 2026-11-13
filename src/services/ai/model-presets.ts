@@ -59,18 +59,18 @@ export const HISTORY_PASS_REQUIRED = 1;
 const OPENROUTER_PRICE_SOURCE = 'OpenRouter /models list price; billed cost can differ, a reported usage.cost wins';
 
 /**
- * Seeded from the 2026-09-27 benchmark (PR #429) and the OpenRouter model ids verified on 2026-10-23.
+ * Seeded from the 2026-09-27 benchmark (PR #429); each route's price records its verification date.
  * No preset is qualified: the benchmark was through another host, on reconstructed scenarios.
  */
 export const MODEL_PRESETS: readonly ModelPreset[] = [
   {
     id: 'deepseek41-flash',
-    models: { openrouter: 'deepseek/deepseek-v4.1-flash' },
+    models: { openrouter: 'deepseek/deepseek-v4.1-flash-1017' },
     prices: {
       openrouter: {
         inputUsdPerMTok: 0.3,
         outputUsdPerMTok: 1.2,
-        asOf: '2026-10-23',
+        asOf: '2026-11-13',
         source: OPENROUTER_PRICE_SOURCE,
       },
     },

@@ -169,6 +169,16 @@ describe('resolveModelOverride', () => {
     resetModelRegistry();
   });
 
+  test('never removes an explicit Hugging Face provider pin during replacement', async () => {
+    const { client, list } = makeListingClient(['meta-llama/Llama-4-Scout-17B-16E-Instruct']);
+    const configuredModel = 'meta-llama/Llama-4-Scout-17B-16E-Instruct:deepinfra';
+    const resolved = await resolveModelOverride({ provider: 'hf', client, configuredModel });
+
+    expect(resolved).toBeNull();
+    expect(list).not.toHaveBeenCalled();
+    expect(getModelOverride('hf', configuredModel)).toBeNull();
+  });
+
   test('probes /v1/models and returns a live replacement', async () => {
     const { client, list } = makeListingClient(['whisper-large-v3', 'vendor/model-120b']);
 

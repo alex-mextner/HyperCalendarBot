@@ -242,13 +242,12 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
-**Model ids are env values, refreshed against the live catalogs** (2026-10-24; `ZAI_*`/`HF_*` are required env, `CLAUDE_*` optional). z.ai coding endpoint `/models`: newest are `glm-5.3` (smart) and `glm-5.3-flash` (fast; `glm-5.3-flashx` is not in the Max plan, code 1311). Both answer 429 code 1310 while the weekly premium quota is exhausted (an unknown id would be 400 code 1211), so a 429 does not mean a bad id; the chain falls through to Claude. `glm-5.1` and `glm-4.7-flash` still exist but are superseded. Anthropic `/v1/models`: `claude-sonnet-5-5` and `claude-haiku-5-5` are the newest Sonnet and Haiku (nothing above 5.5 in those tiers). HF router: `meta-llama/Llama-3.3-70B-Instruct` and `Qwen/Qwen3-235B-A22B` are still listed live; HF has no credits (402), so a replacement cannot be probed and the ids are kept until they disappear from `/models`.
+**Model ids are env values, checked against current catalogs** (2026-11-13; `ZAI_*`/`HF_*` are required env, `CLAUDE_*` optional). Claude uses `claude-sonnet-5-5` and `claude-haiku-5-5`; z.ai uses `glm-5.3` and `glm-5.3-flash`. HF examples use `meta-llama/Llama-4-Scout-17B-16E-Instruct:deepinfra`. A catalog entry proves availability in the catalog, not successful inference for an account. HF remains the last reserve and its account funding is handled independently of Claude activation.
 
-**Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`, optional `openrouter`); the default for both is z.ai → Claude → HF (the owner's order, identical in ExpenseSyncBot); providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
+**Provider selection is configuration**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list provider ids (`zai`, `claude`, `hf`, optional `openrouter`); the default for both is Claude → z.ai → HF; selected Claude stays first, selected HF last, and other selected providers keep their relative order; providers without key/model are skipped. The ids come from `PROVIDER_IDS` in
 `src/services/ai/provider-ids.ts` — a leaf module that imports nothing, so both the config
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
-nameable at once. Gemini was removed in full (2026-10): no id, no `GEMINI_*` variable is read, and a
-leftover one in `.env` is ignored. Groq as a chat provider was removed in 2026-10 because gpt-oss tested badly
+nameable at once. Groq as a chat provider was removed in 2026-10 because gpt-oss tested badly
 and there is no replacement Groq model: no `groq` id, no `GROQ_MODEL`/`GROQ_FAST_MODEL`/`GROQ_TPM_LIMITS`
 (leftovers in `.env` are ignored, and `groq` in a chain variable is dropped as an unknown id). `GROQ_API_KEY`
 remains ONLY for Whisper voice transcription (`src/services/voice/transcription-service.ts`, initialised in
@@ -265,12 +264,12 @@ a new order in `streaming.ts`.
 `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`), `OPENROUTER_MODEL` (smart
 chain) and `OPENROUTER_FAST_MODEL` (fast chain); no model default. It is in neither default chain: it runs only
 when `AI_SMART_CHAIN` / `AI_FAST_CHAIN` name it AND both the key and that chain's model are set, otherwise its slot
-is skipped like any unconfigured provider. Live-verified ids (2026-10-23, `/models`): `deepseek/deepseek-v4.1-flash`
+is skipped like any unconfigured provider. Live-verified ids (2026-10-23, `/models`): `deepseek/deepseek-v4.1-flash-1017`
 and `z-ai/glm-5.3-flash`. Claude-specific request rules (no `temperature`, the 128k `max_tokens`, the visible-token
 cap) apply only to the `claude` provider, so do not route Claude models through OpenRouter in a chain without
 measuring. Live-model replacement is off for it (it lists hundreds of
 differently priced models), and OpenRouter accepts the `content: null` assistant turn that carries tool calls,
-so the transcript is sent unchanged. Never reintroduce gpt-oss, Groq chat or Gemini through it. Its circuit is
+so the transcript is sent unchanged. Never reintroduce gpt-oss or Groq chat through it. Its circuit is
 scoped to the model (`openrouterCircuitScope`) for rate limits and outages, because OpenRouter routes each model to a different
 upstream: a limit on one model must not bench the other. A rejected or spent key (401, 402, a non-moderation 403) opens one circuit for the
 whole key instead (`CircuitContext.accountKey`, one notice), and any answer closes both.
@@ -341,24 +340,16 @@ is never written as 0 and a failed attempt that was billed carries its cost. Rea
 provider:model counts, errors by class, token sums with the answers that reported none counted apart, cost (`—` when unknown, with a
 count of answers without a cost next to a partial sum), p50/p95, a Roles section of cost and latency per role and provider once any
 row has a role (role-less rows are `legacy`), and one verdict per provider that says `no traffic in window` for a provider that served nothing; it refuses a database that has not run 067) and the
-admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is second in the
-default order and gets no traffic while z.ai answers, so prove it alive with the real code path:
+admin-only Telegram command `/ai_stats [days]` (same report, `t(lang).aiStats`, fail closed). Claude is first in the
+default order. Prove it alive with the real code path:
 `AI_SMART_CHAIN=claude AI_FAST_CHAIN=claude bun scripts/probe-ai-chain.ts --usage-database <temp.db> --expect-provider claude [--smart]`
 prints the probe result and the `ai_usage_events` row it wrote (never point it at the live database).
-Rows (and the report) of retired providers such as `gemini` and `groq` stay readable: the report lists any provider id
-found in the rows after the configured ones. The retired `gemini_usage` table lives only in the sidecar
-`<DATABASE_PATH>.gemini-quota.sqlite`, which no code opens any more; it is left on disk untouched (delete the file by hand when convenient).
+Historical provider rows remain readable: the report lists any provider id found in the rows after the configured ones. Existing database files remain untouched.
 
-**Cost risk of the order**: while z.ai is out of quota (its circuit is open, skipped silently) Claude is the de-facto
-primary and every request is paid for. Claude keeps its `CLAUDE_MAX_OUTPUT_TOKENS` (128000) `max_tokens` and its thinking
+**Cost of the order**: Claude is the primary and every successful primary request is billed to its API account. Claude keeps its `CLAUDE_MAX_OUTPUT_TOKENS` (128000) `max_tokens` and its thinking
 behaviour unchanged. Watch `bun scripts/report-ai-usage.ts` and set `AI_SMART_CHAIN`/`AI_FAST_CHAIN` (e.g. `zai,hf`, or `hf` alone) if the cost
 is not acceptable; the ExpenseSyncBot OCR chain is separate and stays Claude vision → HF vision.
-Both fallbacks have run dry before: z.ai's quota ran out on 2026-09-24 (its circuit has been open since), and Hugging Face
-answered 402 "no credits" in ExpenseSyncBot on 2026-10-12. With z.ai depleted and HF the only provider behind Claude,
-Claude carries the traffic; keep an eye on its spend and on HF credit.
-z.ai is first in both chains, so a slow-but-not-failing z.ai delays every call before Claude is tried: up to 8 s per provider on the
-fast chain (validators, city resolver), up to 15 s on the smart chain; an open circuit costs nothing. The chain order is the owner's choice — shorten
-`ZAI_TIMEOUT_MS` in `clients.ts` or reorder via `AI_FAST_CHAIN` if that latency shows up in `/ai_stats`.
+The fallback accounts have had quota and credit failures before. Those failures stay visible in usage/error telemetry and do not block the primary. A configured OpenRouter route runs before HF. Circuit-open providers are skipped; the remaining selected priority providers keep their relative order. Fast and smart requests retain their existing per-provider deadlines.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

@@ -29,7 +29,7 @@ describe('parseRoleChain', () => {
 
   test.each([
     'groq:gpt-oss',
-    'gemini',
+    'unknown-provider',
     'openrouter:',
     'openrouter:a:b',
     ':preset',

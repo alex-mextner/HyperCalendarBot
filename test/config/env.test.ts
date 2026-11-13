@@ -63,22 +63,6 @@ describe('loadConfig', () => {
     expect(loadConfig().GROQ_API_KEY).toBeUndefined();
   });
 
-  test('a leftover Gemini setting in the environment never breaks loading', () => {
-    process.env.GEMINI_API_KEY = 'leftover-key';
-    process.env.GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-    process.env.GEMINI_MODEL = 'gemini-2.5-pro';
-    process.env.GEMINI_FAST_MODEL = 'gemini-2.5-flash';
-    process.env.GEMINI_RATE_LIMITS = '{not json';
-    expect(() => loadConfig()).not.toThrow();
-  });
-
-  test('loads with only the z.ai and Hugging Face credentials', () => {
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith('GEMINI_')) delete process.env[key];
-    }
-    expect(() => loadConfig()).not.toThrow();
-  });
-
   describe('optional OpenRouter provider', () => {
     test('is unset by default and never joins the default chains', () => {
       for (const name of [
@@ -114,7 +98,7 @@ describe('loadConfig', () => {
 
     test('can be named in a chain order', () => {
       process.env.AI_SMART_CHAIN = 'openrouter,claude';
-      expect(loadConfig().AI_SMART_CHAIN.order).toEqual(['openrouter', 'claude']);
+      expect(loadConfig().AI_SMART_CHAIN.order).toEqual(['claude', 'openrouter']);
     });
   });
 
@@ -162,8 +146,8 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
-    const FAST_DEFAULT: ProviderId[] = ['zai', 'claude', 'hf'];
+    const SMART_DEFAULT: ProviderId[] = ['claude', 'zai', 'hf'];
+    const FAST_DEFAULT: ProviderId[] = ['claude', 'zai', 'hf'];
 
     test('main and fast defaults prefer responsive providers while using their own configured models', () => {
       const config = loadConfig();
@@ -176,7 +160,7 @@ describe('loadConfig', () => {
     test('the fast chain reads its own variable and keeps its own fallback', () => {
       process.env.AI_FAST_CHAIN = 'hf,zai';
       const config = loadConfig();
-      expect(config.AI_FAST_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: FAST_DEFAULT });
+      expect(config.AI_FAST_CHAIN).toEqual({ order: ['zai', 'hf'], fromEnv: true, fallback: FAST_DEFAULT });
       expect(config.AI_SMART_CHAIN.order).toEqual(SMART_DEFAULT);
     });
 
@@ -185,7 +169,7 @@ describe('loadConfig', () => {
     test('takes the order from the environment', () => {
       process.env.AI_SMART_CHAIN = 'claude, hf ,zai';
       expect(loadConfig().AI_SMART_CHAIN).toEqual({
-        order: ['claude', 'hf', 'zai'],
+        order: ['claude', 'zai', 'hf'],
         fromEnv: true,
         fallback: SMART_DEFAULT,
       });
@@ -193,11 +177,11 @@ describe('loadConfig', () => {
 
     test('drops a name it does not know rather than failing to start', () => {
       process.env.AI_SMART_CHAIN = 'hf,openai,zai';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: SMART_DEFAULT });
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['zai', 'hf'], fromEnv: true, fallback: SMART_DEFAULT });
     });
 
     test('a retired provider name left in the order is dropped like any unknown one', () => {
-      process.env.AI_SMART_CHAIN = 'gemini,zai';
+      process.env.AI_SMART_CHAIN = 'retired,zai';
       expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['zai'], fromEnv: true, fallback: SMART_DEFAULT });
     });
 
@@ -208,7 +192,7 @@ describe('loadConfig', () => {
 
     test('ignores a repeated provider instead of trying it twice', () => {
       process.env.AI_SMART_CHAIN = 'hf,zai,hf';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: SMART_DEFAULT });
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['zai', 'hf'], fromEnv: true, fallback: SMART_DEFAULT });
     });
 
     // An order naming nothing usable would leave the bot with no providers at

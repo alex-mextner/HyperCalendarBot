@@ -15,8 +15,8 @@ export type AiErrorClass =
   | 'other';
 
 /**
- * Why a provider was passed over without a request being sent. `local_budget` (Gemini's local quota
- * admission, removed in #806) and `preflight_size` (the Groq token-fit preflight, removed with Groq as
+ * Why a provider was passed over without a request being sent. `local_budget` (retired local quota
+ * admission) and `preflight_size` (the Groq token-fit preflight, removed with Groq as
  * a chat provider) are retired and never written any more; they stay so that historical rows keep
  * their type.
  */

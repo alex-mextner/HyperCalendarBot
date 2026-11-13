@@ -22,13 +22,14 @@ interface FakeProvider {
   requests: FakeRequest[];
 }
 
-function fakeProvider(text: string): FakeProvider {
+function fakeProvider(text: string, onRequest?: () => void): FakeProvider {
   const requests: FakeRequest[] = [];
   const client = {
     chat: {
       completions: {
         create: async (params: FakeRequest) => {
           requests.push(params);
+          onRequest?.();
           async function* chunks() {
             yield { choices: [{ delta: { content: text }, finish_reason: null }] };
             yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
@@ -94,11 +95,44 @@ describe('an excluded configured model', () => {
   });
 
   test('does not exclude the same provider when its model is allowed', async () => {
-    process.env.AI_FAST_CHAIN = 'hf,claude';
+    process.env.AI_FAST_CHAIN = 'hf';
     const result = await aiStreamRound({ messages, maxTokens: 100, fast: true });
 
     expect(result.text).toBe('from hf');
     expect(hf.requests[0]?.model).toBe('meta/llama-fast');
+  });
+});
+
+describe('provider priority', () => {
+  test.each([false, true])('Claude answers before configured reserves, fast=%s', async (fast) => {
+    process.env.AI_SMART_CHAIN = 'hf,zai,claude';
+    process.env.AI_FAST_CHAIN = 'hf,zai,claude';
+    process.env.HF_MODEL = 'hf-main';
+    const zai = fakeProvider('from zai');
+    providerClients.zai = () => zai.client;
+    const result = await aiStreamRound({ messages, maxTokens: 100, fast });
+    expect(result.text).toBe('from claude');
+    expect(zai.requests).toHaveLength(0);
+    expect(hf.requests).toHaveLength(0);
+  });
+
+  test('HF runs only after Claude and the other selected priority providers fail', async () => {
+    Object.assign(process.env, {
+      AI_SMART_CHAIN: 'hf,openrouter,zai,claude',
+      HF_MODEL: 'hf-main',
+      OPENROUTER_API_KEY: 'or-key',
+      OPENROUTER_MODEL: 'vendor/model',
+    });
+    const order: string[] = [];
+    for (const id of ['claude', 'openrouter', 'zai', 'hf'] as const) {
+      const fake = fakeProvider(`from ${id}`, () => {
+        order.push(id);
+        if (id !== 'hf') throw Object.assign(new Error('synthetic unavailable'), { status: 500 });
+      });
+      providerClients[id] = () => fake.client;
+    }
+    expect((await aiStreamRound({ messages, maxTokens: 100 })).text).toBe('from hf');
+    expect(order).toEqual(['claude', 'openrouter', 'zai', 'hf']);
   });
 });
 
