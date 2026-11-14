@@ -74,12 +74,19 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    # autoheal on the odroid restarts any container that turns unhealthy, and /health is 503
+    # until the Telegram start finishes. Cold starts on the loaded host took 95-170 s
+    # (2026-11-11) and 440 s after a hard reset (2026-11-14); a 30 s start_period restarted
+    # them from zero in a loop (#980). Failures inside start_period do not count, start_interval
+    # still reports healthy within 10 s of a fast start, and a bot that hangs after starting is
+    # caught by interval x retries as before.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3311/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 10m
+      start_interval: 10s
     # The home ODROID-N2+ (6 cores, 3.7 GB RAM) hosts this bot since 2026-10-09, shared
     # with ExpenseSyncBot, HyperSummaryBot, Home Assistant and others: 1.5 CPUs leaves them
     # headroom. RAM there is overcommitted (2 GB in swap on 2026-10-10, the idle bot down to
