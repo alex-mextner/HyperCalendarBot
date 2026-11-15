@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, type Mock, mock, spyOn, test } from 'bun:test';
+import type { OAuth2Client } from 'google-auth-library';
 import type { EnvConfig } from '../../../src/config/env.ts';
 import type { GoogleSyncRepository } from '../../../src/database/repositories/google-sync.repository.ts';
 import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
@@ -70,6 +71,10 @@ const flushAsync = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 const FUTURE_EXPIRES = new Date(Date.now() + 60 * 60_000).toISOString(); // 1h from now
 const PAST_EXPIRES = new Date(Date.now() - 60_000).toISOString(); // 1m ago
+
+// gaxios's GaxiosResponse, read off the client: gaxios is only a transitive dependency, so the
+// isolated linker does not let this test import it by name.
+type TokenResponse = Awaited<ReturnType<OAuth2Client['transporter']['request']>>;
 
 describe('GoogleOAuthService.getAuthClient', () => {
   afterEach(() => {
@@ -191,6 +196,30 @@ describe('GoogleOAuthService.getAuthClient', () => {
     client.emit('tokens', { access_token: 'new' });
     await flushAsync();
     expect(redis.get).not.toHaveBeenCalled();
+  });
+
+  test('holding the lock with a token that is still valid but inside the refresh threshold: the first request refreshes and releases the lock', async () => {
+    // A token with 3 minutes left takes the lock (threshold 5 min) but google-auth-library would keep
+    // using it until it expires: no refresh, no 'tokens' event, and the lock blocks other callers for
+    // its whole 30 s TTL.
+    const expiringSoon = new Date(Date.now() + 3 * 60_000).toISOString();
+    const syncRepo = makeSyncRepo(syncStateRow({ access_token: 'old', expires_at: expiringSoon }));
+    const redis = makeRedis('OK');
+    const svc = makeService(VALID_USER, syncRepo, redis);
+    const client = await svc.getAuthClient(42);
+    const lockVal = redis.set.mock.calls[0]?.[1];
+    redis.get.mockImplementation(() => Promise.resolve(lockVal ?? null));
+    const tokenRequest = spyOn(client.transporter, 'request').mockResolvedValue(
+      partialOf<TokenResponse>('tokenResponse', { data: { access_token: 'new', expires_in: 3600 } }),
+    );
+
+    const { token } = await client.getAccessToken();
+    await flushAsync();
+
+    expect(token).toBe('new');
+    expect(tokenRequest).toHaveBeenCalledTimes(1);
+    expect(syncRepo.updateAccessToken).toHaveBeenCalledWith(42, 'new', expect.any(String));
+    expect(redis.del).toHaveBeenCalledWith('gcal:refresh:42');
   });
 
   test('lock not acquired: waits until the lock key is released, then reads fresh state', async () => {

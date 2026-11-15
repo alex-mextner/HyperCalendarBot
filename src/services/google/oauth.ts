@@ -115,7 +115,7 @@ export class GoogleOAuthService {
     const needsRefresh = !syncState?.expires_at || syncState.expires_at < thresholdIso;
 
     if (needsRefresh && this.redis) {
-      return this.getLockedAuthClient(client, this.redis, userId, refreshToken, syncState?.access_token);
+      return this.getLockedAuthClient(client, this.redis, userId, refreshToken);
     }
 
     // No Redis or token still valid — set credentials and register token update handler
@@ -147,7 +147,6 @@ export class GoogleOAuthService {
     redis: RedisLockClient,
     userId: number,
     refreshToken: string,
-    storedAccessToken: string | null | undefined,
   ): Promise<OAuth2Client> {
     const lockKey = `gcal:refresh:${userId}`;
     const lockVal = crypto.randomUUID();
@@ -165,12 +164,11 @@ export class GoogleOAuthService {
       return client;
     }
 
-    // We hold the lock — google-auth-library will refresh on first API call.
-    // Release the lock once the tokens event fires.
-    client.setCredentials({
-      refresh_token: refreshToken,
-      access_token: storedAccessToken ?? undefined,
-    });
+    // We hold the lock, so the refresh is due now. The stored access token is left out on purpose:
+    // it carries no expiry_date, so google-auth-library would keep using a token that is still valid
+    // for a few minutes, never refresh, never emit 'tokens', and the lock would block every other
+    // caller for its whole TTL. With only the refresh token the first API call refreshes.
+    client.setCredentials({ refresh_token: refreshToken });
 
     client.once('tokens', async (newTokens) => {
       try {
