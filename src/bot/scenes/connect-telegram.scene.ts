@@ -10,6 +10,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import { decryptString, encryptBlob, encryptString } from '../../services/crypto/session-crypto.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import type { ConnectedUserSendMeta } from '../../services/telegram-session/connected-user-sender.ts';
 import { buildUserSessionInvitationText } from '../../services/telegram-session/invitation-text.ts';
 import {
   type BridgeError,
@@ -116,7 +117,7 @@ export interface ConnectTelegramDeps {
     targetId: number,
     text: string,
     username?: string,
-    meta?: { invitationId?: number },
+    meta?: ConnectedUserSendMeta,
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
@@ -709,15 +710,21 @@ function deliverPostConnectInvitation(
     deepLink = deps.deepLinkService.generateUrl(link.code, deps.botUsername);
   }
 
-  if (!deepLink) {
+  if (!deepLink || !deps.botUsername) {
     sceneLogger.warn({ inviterId, eventId }, 'Deep link unavailable — skipping user-session delivery');
     return;
   }
 
-  const text = buildUserSessionInvitationText({ event, inviterTimezone, deepLink, lang });
+  const { text, italicFooter } = buildUserSessionInvitationText({
+    event,
+    inviterTimezone,
+    deepLink,
+    botUsername: deps.botUsername,
+    lang,
+  });
 
   deps
-    .sendAsConnectedUser(inviterId, inviteeId, text, inviteeUsername, { invitationId })
+    .sendAsConnectedUser(inviterId, inviteeId, text, inviteeUsername, { invitationId, italicFooter })
     .catch((err) => sceneLogger.warn({ err, inviterId, inviteeId, eventId }, 'Post-connect delivery failed'));
 }
 

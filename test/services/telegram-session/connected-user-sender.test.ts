@@ -85,7 +85,13 @@ describe('createConnectedUserSender', () => {
 
     expect(result).toBe(true);
     expect(SessionBridge.createTempSessionFile).toHaveBeenCalled();
-    expect(SessionBridge.sendAsUser).toHaveBeenCalledWith('/tmp/tgsess_test.session', 200, 'Hey there', 'bob');
+    expect(SessionBridge.sendAsUser).toHaveBeenCalledWith(
+      '/tmp/tgsess_test.session',
+      200,
+      'Hey there',
+      'bob',
+      undefined,
+    );
     expect(SessionBridge.cleanupTempFile).toHaveBeenCalledWith('/tmp/tgsess_test.session');
   });
 
@@ -192,6 +198,17 @@ describe('createConnectedUserSender', () => {
 
     expect(result).toBe(false);
     expect(SessionBridge.cleanupTempFile).toHaveBeenCalledWith('/tmp/tgsess_test.session');
+  });
+
+  test('passes the invitation footer span to the Python bridge unchanged', async () => {
+    const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
+    const bridgeResult: BridgeResult = { success: true, data: { status: 'ok' } };
+    SessionBridge.sendAsUser = mock(async () => bridgeResult);
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY });
+    const text = '😀\n\nFooter';
+    const italicFooter = { offset: 4, length: 6 };
+    expect(await sender(700213, 200, text, 'bob', { invitationId: 42, italicFooter })).toBe(true);
+    expect(SessionBridge.sendAsUser).toHaveBeenCalledWith('/tmp/tgsess_test.session', 200, text, 'bob', italicFooter);
   });
 
   test('returns false when rate-limited', async () => {

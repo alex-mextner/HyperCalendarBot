@@ -120,10 +120,17 @@ function buildUserSessionSend(
 ): DeliverMessageParams['userSessionSend'] {
   const { event, inviterTimezone, lang, inviterId, invitationId, allowInviterSession = true } = params;
   const sendAsConnected = params.deps.sender.sendAsConnectedUser;
-  if (!allowInviterSession || !event || !url || !sendAsConnected) return undefined;
-  const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
+  const botUsername = params.deps.botUsername;
+  if (!allowInviterSession || !event || !url || !sendAsConnected || !botUsername) return undefined;
+  const { text, italicFooter } = buildUserSessionInvitationText({
+    event,
+    inviterTimezone,
+    deepLink: url,
+    botUsername,
+    lang,
+  });
   return async (targetId, _text, username) =>
-    sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
+    sendAsConnected(inviterId, targetId, text, username, { invitationId, italicFooter });
 }
 
 function buildBotSend(params: DeliverInvitationParams): DeliverMessageParams['botSend'] {

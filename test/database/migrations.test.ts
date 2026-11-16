@@ -86,10 +86,11 @@ test('places marked verified before the bot asked for every place count as uncon
   const legacy = new EventRepository(db).findById(1, 101)!;
   expect(localToGoogle(legacy).location).toBe('Sonder Dorchol');
   expect(generateIcs([legacy])).toContain('LOCATION:Sonder Dorchol\n');
-  const invitation = buildUserSessionInvitationText({
+  const { text: invitation } = buildUserSessionInvitationText({
     event: legacy,
     inviterTimezone: 'Europe/Belgrade',
     deepLink: 'https://t.me/hypercal_bot?start=invite_1',
+    botUsername: 'hypercal_bot',
     lang: 'en',
   });
   expect(invitation).toContain('📍 Sonder Dorchol\n');

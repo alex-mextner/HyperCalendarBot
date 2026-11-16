@@ -3,6 +3,7 @@ import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import { groupRsvpKeyboard, invitationRsvpKeyboard } from '../sharing/invitation-rsvp-keyboard.ts';
+import type { ConnectedUserSendMeta } from '../telegram-session/connected-user-sender.ts';
 import { askUserCallbackData } from './ask-user-buttons.ts';
 import type { InvitationKeyboardVariant, TelegramSender } from './types.ts';
 
@@ -12,7 +13,7 @@ interface TelegramSenderOptions {
     targetId: number,
     text: string,
     username?: string,
-    meta?: { invitationId?: number },
+    meta?: ConnectedUserSendMeta,
   ) => Promise<boolean>;
 }
 

@@ -259,6 +259,8 @@ export const ruAiTools = {
         `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
       deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
         `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую.`,
+      userSessionInvitationFooter: (botUsername: string) =>
+        `Открой @${botUsername}, чтобы приглашать на свои встречи без email.`,
       userSessionInvitation: (args: {
         title: string;
         dateLine: string;

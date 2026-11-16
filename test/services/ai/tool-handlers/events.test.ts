@@ -602,10 +602,11 @@ describe('event tool handlers', () => {
       const row = new EventRepository(db).findById(event.id, USER_ID)!;
       expect(localToGoogle(row).location).toBeUndefined();
       expect(generateIcs([row])).not.toContain('LOCATION');
-      const invitation = buildUserSessionInvitationText({
+      const { text: invitation } = buildUserSessionInvitationText({
         event: row,
         inviterTimezone: 'UTC',
         deepLink: 'https://t.me/hypercal_bot?start=invite_1',
+        botUsername: 'hypercal_bot',
         lang: 'ru',
       });
       expect(invitation).not.toContain('📍');

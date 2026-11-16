@@ -7,6 +7,7 @@ import type { LocationVerificationService } from '../../services/location/locati
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import type { ConnectedUserSendMeta } from '../../services/telegram-session/connected-user-sender.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 import { createAddEventScene } from './add-event.scene.ts';
 import { wrapWithChatId } from './chat-scoped-storage.ts';
@@ -26,7 +27,7 @@ interface ConnectTelegramSceneDeps {
     targetId: number,
     text: string,
     username?: string,
-    meta?: { invitationId?: number },
+    meta?: ConnectedUserSendMeta,
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;

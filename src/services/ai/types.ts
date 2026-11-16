@@ -41,6 +41,7 @@ import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
+import type { ConnectedUserSendMeta } from '../telegram-session/connected-user-sender.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
@@ -476,7 +477,7 @@ export interface TelegramSender {
     targetId: number,
     text: string,
     username?: string,
-    meta?: { invitationId?: number },
+    meta?: ConnectedUserSendMeta,
   ): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
