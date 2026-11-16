@@ -9,6 +9,7 @@ import type { ContactRepository } from '../../../src/database/repositories/conta
 import type { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import type { TelegramSessionRepository } from '../../../src/database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import type { DeepLinkService } from '../../../src/services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
 
@@ -95,7 +96,7 @@ function makeCtx(overrides: {
 
 const NOOP_NEXT = () => Promise.resolve();
 
-function makeScene() {
+function makeScene(overrides: Partial<ConnectTelegramDeps> = {}) {
   const sessionRepo = {
     findByUserId: () => null,
     findByPhoneHash: () => null,
@@ -107,12 +108,10 @@ function makeScene() {
     contactRepo: { findByTelegramId: () => null } as unknown as ContactRepository,
     invitationService: { sendInvitation: () => ({ success: true }) } as unknown as InvitationService,
   };
-  return createConnectTelegramScene(
-    sessionRepo,
-    { TELEGRAM_SESSION_MASTER_KEY: '0'.repeat(64) },
-    mockComposer,
-    baseDeps,
-  );
+  return createConnectTelegramScene(sessionRepo, { TELEGRAM_SESSION_MASTER_KEY: '0'.repeat(64) }, mockComposer, {
+    ...baseDeps,
+    ...overrides,
+  });
 }
 
 describe('connect-telegram: Cancel authorization button', () => {
@@ -298,5 +297,63 @@ describe('connect-telegram: Cancel authorization button', () => {
     expect(text).toBe('Неверный формат. Используй международный формат: +79001234567');
     expect(opts?.reply_markup).toBeDefined();
     expect(ctx.scene.exit).not.toHaveBeenCalled();
+  });
+});
+
+function makeFooterDeps(overrides: Partial<ConnectTelegramDeps>): Partial<ConnectTelegramDeps> {
+  return {
+    eventRepo: {
+      findById: () => ({
+        title: '😀 **literal** <b>tag</b>',
+        start_at: '2026-12-01T10:00:00Z',
+        description: null,
+        location: null,
+        resolved_address: null,
+        venue_name: null,
+        location_verified: 0,
+        google_maps_url: null,
+      }),
+    } as unknown as EventRepository,
+    invitationService: {
+      sendInvitation: () => ({ success: true, invitation: { id: 42 } }),
+    } as unknown as InvitationService,
+    deepLinkService: {
+      createInvitationLink: () => ({ code: 'invite_synthetic' }),
+      generateUrl: (code: string, username: string) => `https://t.me/${username}?start=${code}`,
+    } as unknown as DeepLinkService,
+    botUsername: 'CalendarStageBot',
+    ...overrides,
+  };
+}
+
+describe('post-connect invitation footer', () => {
+  test.each(['ru', 'en'] as const)('resumed delivery carries the same localized italic footer for %s', async (lang) => {
+    const send = mock<NonNullable<ConnectTelegramDeps['sendAsConnectedUser']>>(async () => true);
+    const scene = makeScene(makeFooterDeps({ sendAsConnectedUser: send }));
+    const ctx = makeCtx({ data: 'ct:send_all:42', stepId: 4, lang });
+    ctx.scene.params.pendingInviteeIds = [200];
+    await getStepFns(scene)[4]!(ctx, NOOP_NEXT);
+    expect(send).toHaveBeenCalledTimes(1);
+    const call = send.mock.calls[0]!;
+    expect(call.slice(0, 2)).toEqual([100, 200]);
+    const span = call[4]?.italicFooter;
+    expect(span).toBeDefined();
+    expect(call[2].slice(span!.offset, span!.offset + span!.length)).toBe(
+      lang === 'ru'
+        ? 'Открой @CalendarStageBot, чтобы приглашать на свои встречи без email.'
+        : 'Open @CalendarStageBot to invite people to your own meetings without email.',
+    );
+    expect(call[2]).toContain('😀 **literal** <b>tag</b>');
+    expect(call[2]).toContain('https://t.me/CalendarStageBot?start=invite_synthetic');
+    expect(call[2].split('@CalendarStageBot')).toHaveLength(2);
+  });
+
+  test('missing bot username still skips the resumed account send', async () => {
+    const send = mock<NonNullable<ConnectTelegramDeps['sendAsConnectedUser']>>(async () => true);
+    const scene = makeScene(makeFooterDeps({ sendAsConnectedUser: send, botUsername: undefined }));
+    const ctx = makeCtx({ data: 'ct:send_all:42', stepId: 4 });
+    ctx.scene.params.pendingInviteeIds = [200];
+    await getStepFns(scene)[4]!(ctx, NOOP_NEXT);
+    expect(send).not.toHaveBeenCalled();
   });
 });

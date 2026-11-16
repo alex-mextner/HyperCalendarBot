@@ -256,6 +256,8 @@ export const enAiTools = {
         `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
       deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
         `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly.`,
+      userSessionInvitationFooter: (botUsername: string) =>
+        `Open @${botUsername} to invite people to your own meetings without email.`,
       userSessionInvitation: (args: {
         title: string;
         dateLine: string;

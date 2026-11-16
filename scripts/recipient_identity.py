@@ -8,7 +8,7 @@ class RecipientMismatch(ValueError):
 
 
 async def send_to_recipient(
-    client, user_id: int, text: str, username: str | None = None, parse_mode=None
+    client, user_id: int, text: str, username: str | None = None, parse_mode=None, entities=None
 ):
     """parse_mode=None keeps the client's default combined Markdown+HTML parsing."""
     if type(user_id) is not int or user_id == 0:
@@ -24,4 +24,7 @@ async def send_to_recipient(
             raise RecipientMismatch(
                 "RECIPIENT_MISMATCH: username hint cannot change the numeric recipient"
             )
-    return await client.send_message(user_id, text, parse_mode=parse_mode)
+    options = {"parse_mode": parse_mode}
+    if entities is not None:
+        options["entities"] = entities
+    return await client.send_message(user_id, text, **options)

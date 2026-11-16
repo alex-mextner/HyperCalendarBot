@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
 
 describe('SessionBridge.parseResult', () => {
@@ -183,4 +183,43 @@ describe('SessionBridge.cleanupTempFile', () => {
     // Should not throw
     await SessionBridge.cleanupTempFile('/tmp/tgsess_nonexistent_abc.session');
   });
+});
+
+function makeBridgeProcess(overrides: Partial<ReturnType<typeof Bun.spawn>> = {}): ReturnType<typeof Bun.spawn> {
+  return {
+    stdout: new Blob(['{"status":"ok"}']).stream(),
+    stderr: new Blob([]).stream(),
+    exited: Promise.resolve(0),
+    kill: mock(() => {}),
+    ...overrides,
+  } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
+test('sendAsUser serializes only the explicit footer span and preserves plain text', async () => {
+  const spawn = spyOn(Bun, 'spawn').mockReturnValue(makeBridgeProcess());
+  const text = '😀 **literal** <b>tag</b>\n\nFooter';
+  const italicFooter = { offset: text.length - 6, length: 6 };
+  try {
+    expect(await SessionBridge.sendAsUser('/tmp/synthetic.session', 200, text, 'bob', italicFooter)).toEqual({
+      success: true,
+      data: { status: 'ok' },
+    });
+    expect(spawn.mock.calls[0]?.[0]).toEqual([
+      'venv/bin/python',
+      'scripts/send-as-user.py',
+      '--session_path',
+      '/tmp/synthetic.session',
+      '--user_id',
+      '200',
+      '--text',
+      text,
+      '--username',
+      'bob',
+      '--italic_footer',
+      String(italicFooter.offset),
+      '6',
+    ]);
+  } finally {
+    spawn.mockRestore();
+  }
 });

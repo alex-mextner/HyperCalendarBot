@@ -2,6 +2,7 @@ import type { NotificationLogRepository } from '../../database/repositories/noti
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { decryptBlob } from '../crypto/session-crypto.ts';
+import type { ItalicFooter } from './invitation-text.ts';
 import { type BridgeError, SessionBridge } from './session-bridge.ts';
 import type { DetectionResult } from './timezone-detector.ts';
 
@@ -38,8 +39,9 @@ export interface ConnectedUserSenderDeps {
   onSessionExpired?: (userId: number, reason?: import('./session-loss.ts').SessionLossReason) => void;
 }
 
-interface SendMeta {
+export interface ConnectedUserSendMeta {
   invitationId?: number;
+  italicFooter?: ItalicFooter;
 }
 
 export async function checkTimezoneOpportunistically(
@@ -98,7 +100,7 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     targetId: number,
     text: string,
     sessionData: Buffer,
-    meta: SendMeta | undefined,
+    meta: ConnectedUserSendMeta | undefined,
   ): void {
     if (deps.notifLogRepo && meta?.invitationId !== undefined) {
       deps.notifLogRepo.insert({
@@ -133,7 +135,7 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     targetId: number,
     text: string,
     username?: string,
-    meta?: SendMeta,
+    meta?: ConnectedUserSendMeta,
   ): Promise<boolean> {
     if (isRateLimited(inviterId)) {
       senderLogger.warn({ inviterId, targetId }, 'Rate-limited — falling back to admin session');
@@ -149,7 +151,7 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     const tempPath = await SessionBridge.createTempSessionFile(inviterId, sessionData);
 
     try {
-      const result = await SessionBridge.sendAsUser(tempPath, targetId, text, username);
+      const result = await SessionBridge.sendAsUser(tempPath, targetId, text, username, meta?.italicFooter);
       if (result.success) {
         afterSuccessfulSend(inviterId, targetId, text, sessionData, meta);
         return true;

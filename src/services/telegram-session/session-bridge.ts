@@ -4,6 +4,7 @@ import { open, unlink } from 'node:fs/promises';
 import { z } from 'zod';
 import { logger } from '../../utils/logger.ts';
 import { reportTimeout } from '../incident/timeout-reporter.ts';
+import type { ItalicFooter } from './invitation-text.ts';
 
 const bridgeLogger = logger.child({ module: 'session-bridge' });
 
@@ -219,9 +220,16 @@ async function getAuthorizations(sessionPath: string): Promise<BridgeResult> {
 }
 
 /** Send a message as the connected user. */
-async function sendAsUser(sessionPath: string, userId: number, text: string, username?: string): Promise<BridgeResult> {
+async function sendAsUser(
+  sessionPath: string,
+  userId: number,
+  text: string,
+  username?: string,
+  italicFooter?: ItalicFooter,
+): Promise<BridgeResult> {
   const args = [SEND_SCRIPT, '--session_path', sessionPath, '--user_id', userId.toString(), '--text', text];
   if (username) args.push('--username', username);
+  if (italicFooter) args.push('--italic_footer', String(italicFooter.offset), String(italicFooter.length));
   return spawnBridge(args);
 }
 

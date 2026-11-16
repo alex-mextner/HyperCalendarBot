@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Bot, TelegramError } from 'gramio';
 import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
@@ -211,6 +211,40 @@ describe('deliverInvitation', () => {
 
     expect(result).toEqual({ delivered: true, viaDeepLink: false, viaBotApi: false });
     expect(connectedCalled).toBe(true);
+  });
+
+  test.each(['ru', 'en'] as const)('account fallback carries the localized italic footer for %s', async (lang) => {
+    const invId = createInvitation();
+    const ownSend = mock<NonNullable<TelegramSender['sendAsConnectedUser']>>(async () => true);
+    let botText = '';
+    const sender = makeSender({
+      sendInvitation: async (_id, text) => {
+        botText = text;
+        return null;
+      },
+      sendAsConnectedUser: ownSend,
+    });
+    const result = await deliverInvitation(
+      baseParams({
+        invitationId: invId,
+        deps: makeDeps(sender, { botUsername: 'CalendarStageBot' }),
+        event: seedEvent,
+        lang,
+      }),
+    );
+    expect(result.delivered).toBe(true);
+    expect(ownSend).toHaveBeenCalledTimes(1);
+    const call = ownSend.mock.calls[0]!;
+    const span = call[4]?.italicFooter;
+    expect(span).toBeDefined();
+    expect(call[2].slice(span!.offset, span!.offset + span!.length)).toBe(
+      lang === 'ru'
+        ? 'Открой @CalendarStageBot, чтобы приглашать на свои встречи без email.'
+        : 'Open @CalendarStageBot to invite people to your own meetings without email.',
+    );
+    expect(call[2]).toContain('https://t.me/CalendarStageBot?start=');
+    expect(call[2].split('@CalendarStageBot')).toHaveLength(2);
+    expect(botText).not.toContain('@CalendarStageBot');
   });
 
   test('first-person text from the inviter account names the verified place with a map link', async () => {

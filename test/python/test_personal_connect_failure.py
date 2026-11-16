@@ -29,6 +29,9 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         pyrogram.Client = lambda **kwargs: client
         enums = types.ModuleType("pyrogram.enums")
         enums.ParseMode = types.SimpleNamespace(DISABLED="disabled")
+        enums.MessageEntityType = types.SimpleNamespace(ITALIC="italic")
+        entity_types = types.ModuleType("pyrogram.types")
+        entity_types.MessageEntity = types.SimpleNamespace
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
         spec = importlib.util.spec_from_file_location(
             "tested_personal_sender",
@@ -37,7 +40,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         module = importlib.util.module_from_spec(spec)
         with patch.dict(
             sys.modules,
-            {"pyrogram": pyrogram, "pyrogram.errors": errors, "pyrogram.enums": enums},
+            {"pyrogram": pyrogram, "pyrogram.errors": errors, "pyrogram.enums": enums, "pyrogram.types": entity_types},
         ):
             spec.loader.exec_module(module)
         output = io.StringIO()
