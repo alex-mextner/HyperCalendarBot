@@ -1,5 +1,6 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
+import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import type { TelegramSessionRepository } from '../../../src/database/repositories/telegram-session.repository.ts';
 import { encryptBlob } from '../../../src/services/crypto/session-crypto.ts';
 import {
@@ -89,22 +90,61 @@ describe('createConnectedUserSender', () => {
     expect(SessionBridge.cleanupTempFile).toHaveBeenCalledWith('/tmp/tgsess_test.session');
   });
 
-  test('logs to notification_log on success when meta provided', async () => {
+  // The production shape (#991): the invitee has never started the bot, so only the inviter
+  // (the session owner) has a users row, and notification_log.user_id references users.
+  function makeNotificationLogWithOnlyInviter(inviterId: number): { db: Database; repo: NotificationLogRepository } {
+    const db = new Database(':memory:');
+    db.run('PRAGMA foreign_keys = ON');
+    db.run('CREATE TABLE users (telegram_id INTEGER PRIMARY KEY)');
+    db.run(`CREATE TABLE notification_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      reference_key TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      channel TEXT NOT NULL DEFAULT 'telegram_text',
+      payload TEXT,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+    )`);
+    db.run('CREATE UNIQUE INDEX idx_notification_log_dedup ON notification_log(reference_key)');
+    db.run('INSERT INTO users (telegram_id) VALUES (?)', [inviterId]);
+    return { db, repo: new NotificationLogRepository(db) };
+  }
+
+  // Own inviter ids: the per-inviter send limit is module state shared by every test in this file.
+  test('a send to someone who never started the bot is delivered and counted for the inviter', async () => {
+    const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
+    const { db, repo } = makeNotificationLogWithOnlyInviter(99_101);
+    SessionBridge.sendAsUser = mock(async (): Promise<BridgeResult> => ({ success: true, data: { status: 'ok' } }));
+
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY, notifLogRepo: repo });
+    const delivered = await sender(99_101, 200, 'invitation text', 'bob', { invitationId: 42 });
+
+    expect(delivered).toBe(true);
+    expect(repo.getDeliveryStats(99_101).total).toBe(1);
+    expect(db.query('SELECT user_id, reference_key, status FROM notification_log').all()).toEqual([
+      { user_id: 99_101, reference_key: 'invitation_42_200_mtproto_user', status: 'sent' },
+    ]);
+  });
+
+  test('a send-log write that fails after the message went out still reports it delivered', async () => {
     const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
     const notifLogRepo = makeMockNotifLogRepo();
-    const bridgeResult: BridgeResult = { success: true, data: { status: 'ok' as const } };
-    SessionBridge.sendAsUser = mock(async () => bridgeResult);
+    notifLogRepo.insert.mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+    SessionBridge.sendAsUser = mock(async (): Promise<BridgeResult> => ({ success: true, data: { status: 'ok' } }));
 
     const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY, notifLogRepo });
-    await sender(100, 200, 'invitation text', 'bob', { invitationId: 42 });
+    const delivered = await sender(99_102, 200, 'invitation text', 'bob', { invitationId: 42 });
 
-    expect(notifLogRepo.insert).toHaveBeenCalledWith({
-      user_id: 200,
-      type: 'invitation_sent',
-      reference_key: 'invitation_42_200_mtproto_user',
-      channel: 'mtproto_user',
-      payload: 'invitation text',
-    });
+    // false would send the inviter a forward link for an invitation the invitee already has.
+    expect(delivered).toBe(true);
+    expect(notifLogRepo.insert).toHaveBeenCalledTimes(1);
   });
 
   test('does not log to notification_log when no meta', async () => {
