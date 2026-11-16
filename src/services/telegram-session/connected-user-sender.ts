@@ -93,6 +93,12 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     }
   }
 
+  /**
+   * Bookkeeping for a message that already went out, so nothing here may turn the send into a
+   * failure: the caller would then hand the inviter a forward link for an invitation the invitee
+   * already has. The send-log row belongs to the session owner (the /tg-sessions stats read it by
+   * owner); the invitee may never have started the bot and so has no users row to reference.
+   */
   function afterSuccessfulSend(
     inviterId: number,
     targetId: number,
@@ -101,13 +107,22 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     meta: SendMeta | undefined,
   ): void {
     if (deps.notifLogRepo && meta?.invitationId !== undefined) {
-      deps.notifLogRepo.insert({
-        user_id: targetId,
-        type: 'invitation_sent',
-        reference_key: `invitation_${meta.invitationId}_${targetId}_mtproto_user`,
-        channel: 'mtproto_user',
-        payload: text,
-      });
+      try {
+        const logId = deps.notifLogRepo.insert({
+          user_id: inviterId,
+          type: 'invitation_sent',
+          reference_key: `invitation_${meta.invitationId}_${targetId}_mtproto_user`,
+          channel: 'mtproto_user',
+          payload: text,
+        });
+        // The message is already out; a row left at the default 'queued' would say otherwise.
+        if (logId !== null) deps.notifLogRepo.markSent(logId);
+      } catch (err) {
+        senderLogger.warn(
+          { err, inviterId, invitationId: meta.invitationId },
+          'Sent as the connected user, but the send log was not written',
+        );
+      }
     }
 
     if (deps.onTimezoneDetected || deps.onTzConsentNeeded) {
