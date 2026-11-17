@@ -1,5 +1,7 @@
 // Delivery step shared by send_invitation and resend_invitation: build the deliverInvitation call
 // from the agent context, classify its outcome, and attach the optional /connect_telegram hint.
+import { InlineKeyboard } from 'gramio';
+import { t } from '../../../config/constants.ts';
 import type { CalendarEvent } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { deliverInvitation, type InvitationDeliveryResult } from '../invitation-delivery.ts';
@@ -16,20 +18,34 @@ export function deliveryState(delivery: InvitationDeliveryResult): DeliveryState
 }
 
 const CONNECT_SUGGESTION_HINT =
-  'The bot could not reach the invitee directly: end your reply with the /connect_telegram line above, verbatim.';
+  'Direct invitation delivery could not be confirmed: end your reply with the /connect_telegram line above, verbatim.';
 
 /**
  * Decided here, not by the model: a prompt step asking it to check connect_telegram_status first
  * made weak models call that tool on plain event creation (#511).
  */
-export function connectSuggestionAfterDelivery(
+export async function connectSuggestionAfterDelivery(
   ctx: AgentContext,
   delivery: InvitationDeliveryResult,
   isGroupTarget: boolean,
   invitationId: number,
-): string | null {
+): Promise<string | null> {
+  if (ctx.requestSignal?.aborted) return null;
   try {
-    return takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
+    const suggestion = takeConnectTelegramSuggestion(ctx, delivery, isGroupTarget);
+    if (suggestion && ctx.sender?.sendMessageWithKeyboard) {
+      // Delivery has completed. An optional button must not delay recording that write outcome.
+      void ctx.sender
+        .sendMessageWithKeyboard(
+          ctx.user.telegram_id,
+          suggestion,
+          new InlineKeyboard().text(t(ctx.user.language).connectTelegram.btnReconnect, 'stg:tg_connect'),
+        )
+        .catch((err) => {
+          deliveryLogger.warn({ err, invitationId }, 'Could not send the private reconnect button');
+        });
+    }
+    return suggestion;
   } catch (err) {
     // The invitation is already sent; an optional hint must not turn it into a failed write.
     deliveryLogger.warn({ err, invitationId }, 'Connect-Telegram suggestion failed');
@@ -85,6 +101,7 @@ export function deliverInvitationFromContext(
     fallbackChatId: ctx.user.telegram_id,
     allowInviterSession: !target.isGroupTarget && !actingForOwner,
     isGroupTarget: target.isGroupTarget,
+    signal: ctx.requestSignal,
     deps: {
       sender,
       invitationRepo: sharing.invitationRepo,

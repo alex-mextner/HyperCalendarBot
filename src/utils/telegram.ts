@@ -149,10 +149,9 @@ function splitHtmlMessage(text: string, maxLen: number): string[] {
   return chunks;
 }
 
-export function formatUtcOffset(timezone: string): string {
-  const d = new Date();
+export function formatUtcOffset(timezone: string, now = new Date()): string {
   const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
-  const parts = formatter.formatToParts(d);
+  const parts = formatter.formatToParts(now);
   const tzPart = parts.find((p) => p.type === 'timeZoneName');
   const raw = tzPart?.value ?? timezone;
   // Normalize GMT+X to UTC+X, then collapse a zero offset (GMT+0 / GMT+00:00 on

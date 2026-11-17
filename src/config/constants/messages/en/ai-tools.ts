@@ -253,9 +253,9 @@ export const enAiTools = {
       editProposalSubmitted: (id: number) =>
         `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
       deliveryFallbackWithLink: (eventTitle: string, invitee: string, url: string) =>
-        `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
+        `⚠️ Could not confirm direct delivery of the invitation to ${invitee} for "${eventTitle}". If the invitation did not arrive, forward this link to the invitee: ${url}`,
       deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
-        `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly.`,
+        `⚠️ Could not confirm direct delivery of the invitation to ${invitee} for "${eventTitle}".`,
       userSessionInvitation: (args: {
         title: string;
         dateLine: string;

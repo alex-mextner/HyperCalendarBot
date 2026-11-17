@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_recipient_identity import FakeClient
+from test_recipient_identity import CONTACTS, FakeClient
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 ERRORS = types.ModuleType("pyrogram.errors")
@@ -105,6 +105,7 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
                 with (
                     contextlib.redirect_stdout(io.StringIO()),
                     contextlib.redirect_stderr(io.StringIO()),
+                    patch.dict(sys.modules, {"pyrogram.raw.functions.contacts": CONTACTS}),
                 ):
                     if resolved_id != 5000000001:
                         with self.assertRaises(SystemExit):
@@ -122,7 +123,8 @@ class TransportWiringTests(unittest.IsolatedAsyncioTestCase):
                             "@hint",
                         )
                 self.assertTrue(client.disconnected)
-                self.assertEqual(client.lookups, [5000000001, "hint"])
+                self.assertEqual(client.lookups, [5000000001])
+                self.assertEqual(client.resolutions, ["hint"])
                 self.assertEqual(
                     client.sent,
                     [(5000000001, "synthetic")] if resolved_id == 5000000001 else [],

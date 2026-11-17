@@ -23,6 +23,7 @@ function makeSessionRepo(sessions: TelegramSession[]) {
   const expireIfCurrent = mock((_userId: number, _credential: Uint8Array) => true);
   const repo = {
     getAllActive: () => sessions,
+    getActive: (userId: number) => sessions.find((session) => session.user_id === userId) ?? null,
     expireIfCurrent,
   };
   return { repo: repo as unknown as TelegramSessionRepository, expireIfCurrent };

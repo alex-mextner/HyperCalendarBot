@@ -1,15 +1,55 @@
-/** Request-scoped, bounded live-profile inspection through the shared service account
- *  (ctx.lookupTelegramUser, present only when that account is on). Callers must check permission on
- *  every use; without the account every inspection is null and callers use saved metadata. */
+/** Request-scoped recipient metadata. Exact username resolutions retain their verified profile for
+ *  ID-based sends; optional direct-ID inspections use the configured service account. Callers must
+ *  still check recipient permission on every use. */
 import { reportTimeout } from '../incident/timeout-reporter.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import type { AgentContext } from './types.ts';
 
 type Profile = TelegramProfile & { checkedAt: string };
+type RememberedProfile = { profile: Profile; source: 'inspection' | 'username' };
 type Inspection = { expiresAt: number; pending: Promise<Profile | null>; result?: Profile | null };
 const inspections = new WeakMap<AgentContext, Map<string, Inspection>>();
 const TTL = 30_000;
 const MAX_INSPECTIONS = 8;
+const resolvedProfiles = new WeakMap<AgentContext, Map<string, RememberedProfile>>();
+const MAX_RESOLVED_PROFILES = 32;
+
+function rememberProfile(ctx: AgentContext, profile: Profile, source: RememberedProfile['source']): void {
+  let cache = resolvedProfiles.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    resolvedProfiles.set(ctx, cache);
+  }
+  const key = `${ctx.user.telegram_id}:${profile.id}`;
+  cache.set(key, { profile: { ...profile }, source });
+  if (cache.size > MAX_RESOLVED_PROFILES) cache.delete(cache.keys().next().value!);
+}
+
+/** Inspection evidence remains authoritative even if its profile hint was evicted. */
+function retainedInspection(ctx: AgentContext, key: string): Profile | null {
+  const entry = inspections.get(ctx)?.get(key);
+  if (entry && entry.expiresAt > Date.now() && entry.result) return entry.result;
+  const remembered = resolvedProfiles.get(ctx)?.get(key);
+  return remembered?.source === 'inspection' ? remembered.profile : null;
+}
+
+/** Keep a verified username hint for this turn; the send path still pins the numeric recipient ID. */
+export function rememberResolvedRecipient(
+  ctx: AgentContext,
+  profile: TelegramProfile,
+  source: 'personal' | 'service',
+): void {
+  const key = `${ctx.user.telegram_id}:${profile.id}`;
+  if (source === 'service') {
+    // Service username responses can come from a ten-minute cache. Keep direct inspection
+    // evidence, including the last completed result while another inspection is pending.
+    if (retainedInspection(ctx, key)) return;
+  } else {
+    // A fresh personal resolution supersedes an older inspection, including one still in flight.
+    inspections.get(ctx)?.delete(key);
+  }
+  rememberProfile(ctx, { ...profile, checkedAt: new Date().toISOString() }, 'username');
+}
 
 export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<Profile | null> {
   if (!ctx.lookupTelegramUser) return Promise.resolve(null);
@@ -49,6 +89,9 @@ export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<
   const entry: Inspection = { expiresAt: now + TTL, pending };
   pending.then((result) => {
     entry.result = result;
+    // Do not let a superseded query overwrite a later username resolution.
+    if (result && result.id === id && inspections.get(ctx)?.get(key) === entry)
+      rememberProfile(ctx, result, 'inspection');
   });
   cache.set(key, entry);
   return pending;
@@ -56,7 +99,6 @@ export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<
 
 /** Read only a completed, caller-scoped inspection; never start optional I/O during delivery. */
 export function cachedRecipientProfile(ctx: AgentContext, id: number): Profile | null {
-  const entry = inspections.get(ctx)?.get(`${ctx.user.telegram_id}:${id}`);
-  if (!entry || entry.expiresAt <= Date.now()) return null;
-  return entry.result ?? null;
+  const key = `${ctx.user.telegram_id}:${id}`;
+  return retainedInspection(ctx, key) ?? resolvedProfiles.get(ctx)?.get(key)?.profile ?? null;
 }

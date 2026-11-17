@@ -29,9 +29,8 @@ const ADDRESS_MAX_CHARS = 2_000;
  * context with nothing from today onwards, which is the opposite of what the
  * section is for. Distance from now is what "nearest" has to mean here.
  */
-function nearestOccurrences(events: EventOccurrence[], limit: number): EventOccurrence[] {
+function nearestOccurrences(events: EventOccurrence[], limit: number, now: number): EventOccurrence[] {
   if (events.length <= limit) return events;
-  const now = Date.now();
   const at = (occ: EventOccurrence) => new Date(occ.occurrence_start).getTime();
   const distance = (occ: EventOccurrence) => Math.abs(at(occ) - now);
   // Both sorts compare instants. Ordering the display by the raw string would
@@ -42,10 +41,10 @@ function nearestOccurrences(events: EventOccurrence[], limit: number): EventOccu
     .sort((a, b) => at(a) - at(b));
 }
 
-function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
+function formatEventsWindow(events: EventOccurrence[], timezone: string, now: Date): string {
   if (events.length === 0) return '(no events in this window)';
 
-  const shown = nearestOccurrences(events, EVENTS_WINDOW_MAX_OCCURRENCES);
+  const shown = nearestOccurrences(events, EVENTS_WINDOW_MAX_OCCURRENCES, now.getTime());
   const byDay = new Map<string, string[]>();
   const dayLabels = new Map<string, string>();
 
@@ -61,7 +60,7 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
     byDay.get(dateKey)!.push(`${timeStr} ${occ.event.title}`);
   }
 
-  const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
+  const todayKey = format(new TZDate(now.getTime(), timezone), 'yyyy-MM-dd');
   const lines = [...byDay.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, entries]) => {
@@ -80,10 +79,10 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
   return lines.join('\n');
 }
 
-function buildEventsWindowSection(ctx: AgentContext): string {
+function buildEventsWindowSection(ctx: AgentContext, now: Date): string {
   if (!ctx.recentEventsWindow) return '';
   return `## Schedule Context (±2 weeks, local time)
-${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}
+${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone, now)}
 Use this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`;
 }
 
@@ -280,7 +279,7 @@ function buildPeopleRules(): string {
   2. For each mentioned person, determine how they were referenced:
      **a) @username** — call send_invitation with invitee_username. An unknown username opens the user picker automatically.
      **b) Name (no @username)** — call get_contacts; match the name (preferred_name first, then name). Found: send_invitation with invitee_id = its telegram_id (never contact_id); if telegram_id:none, invitee_username = its saved @username (none saved: pick_users). Not found: pick_users.
-  3. When you receive a [User picker result] message: do NOT call send_invitation (already done by the picker); call add_contact if the selected person's display name differs from the name the user used (use preferred_name = how the user referred to them); then acknowledge to the user.
+  3. A [User picker result] continuation is read-only: the picker already attempted delivery and saving the selected Telegram profiles. Read get_invitation_status/get_contacts as needed, then acknowledge the recorded outcomes. Preserve existing preferred names; never invent or apply an alias during this continuation. If a requested alias remains unsaved, say so. A later explicit user request can rename the contact normally.
   NEVER use an invitee_id that did not come from get_contacts, find_user, or the pick_users callback in this conversation. Any telegram_id from memory, prior failed calls, or assumption is forbidden as invitee_id.
 - DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
 }
@@ -583,11 +582,11 @@ function joinSections(sections: readonly string[]): string {
   return sections.filter((section) => section.length > 0).join('\n\n');
 }
 
-export function buildSystemPromptParts(ctx: AgentContext): SystemPromptParts {
+export function buildSystemPromptParts(ctx: AgentContext, at = new Date()): SystemPromptParts {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
-  const utcOffset = formatUtcOffset(ctx.user.timezone);
-  // One instant for the displayed local time and the dated example, so midnight cannot fall between them.
-  const now = new TZDate(Date.now(), ctx.user.timezone);
+  const utcOffset = formatUtcOffset(ctx.user.timezone, at);
+  // The run's instant dates every dynamic section, including the schedule's today marker.
+  const now = new TZDate(at.getTime(), ctx.user.timezone);
 
   return {
     stable: joinSections([
@@ -605,7 +604,7 @@ export function buildSystemPromptParts(ctx: AgentContext): SystemPromptParts {
       buildMemorySection(ctx),
       buildAddressSection(ctx),
       buildPendingGeoSection(ctx),
-      buildEventsWindowSection(ctx),
+      buildEventsWindowSection(ctx, at),
       buildGroupContextSection(ctx),
       buildSecretarySection(ctx),
       buildSupplementSection(ctx),
@@ -623,8 +622,8 @@ export function assembleSystemPrompt(parts: SystemPromptParts, toolIndex?: strin
 }
 
 /** The whole prompt as one string, for callers that do not need the parts (offline scripts and tests). */
-export function buildSystemPrompt(ctx: AgentContext): string {
-  return assembleSystemPrompt(buildSystemPromptParts(ctx));
+export function buildSystemPrompt(ctx: AgentContext, now = new Date()): string {
+  return assembleSystemPrompt(buildSystemPromptParts(ctx, now));
 }
 
 /**
@@ -638,9 +637,9 @@ export function buildSystemPrompt(ctx: AgentContext): string {
  * secretary for many calendars), so when the validator's cap cuts this text it
  * cuts the end of User Info, never the newest facts.
  */
-export function buildUserProfileEvidence(ctx: AgentContext): string {
-  const now = new TZDate(Date.now(), ctx.user.timezone);
-  return [buildMemorySection(ctx), buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone), now)]
+export function buildUserProfileEvidence(ctx: AgentContext, at = new Date()): string {
+  const now = new TZDate(at.getTime(), ctx.user.timezone);
+  return [buildMemorySection(ctx), buildUserInfoSection(ctx, formatUtcOffset(ctx.user.timezone, at), now)]
     .filter((section) => section.length > 0)
     .join('\n\n');
 }

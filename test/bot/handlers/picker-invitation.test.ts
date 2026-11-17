@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   buildChatSharedResultText,
+  buildPickerResultMessage,
   createPickerAckIo,
   deliverPickerInvitation,
   deliverPickerInvitations,
@@ -98,13 +99,13 @@ describe('pickerStatusLine', () => {
     const outcome = ALL_KINDS.find((o) => o.kind === kind)!;
     const line = pickerStatusLine('en', 'Bob', outcome);
     expect(line).toContain('Bob');
-    expect(line).toMatch(/[✅🔗❌]/u);
+    expect(line).toMatch(/✅|🔗|❌|⚠️/u);
   });
 
   test('EN routes each kind to its distinct localized string', () => {
     expect(pickerStatusLine('en', 'Bob', { kind: 'delivered' })).toBe('✅ Bob');
     expect(pickerStatusLine('en', 'Bob', { kind: 'deeplink' })).toContain('link sent to you to forward');
-    expect(pickerStatusLine('en', 'Bob', { kind: 'failed' })).toContain('not delivered');
+    expect(pickerStatusLine('en', 'Bob', { kind: 'failed' })).toContain('direct delivery unconfirmed');
     expect(pickerStatusLine('en', 'Bob', { kind: 'notConfigured' })).toContain('invitations not configured');
     expect(pickerStatusLine('en', 'Bob', { kind: 'error', error: 'boom' })).toBe('❌ Bob: boom');
   });
@@ -112,7 +113,7 @@ describe('pickerStatusLine', () => {
   test('RU routes each kind to its distinct localized string', () => {
     expect(pickerStatusLine('ru', 'Боб', { kind: 'delivered' })).toBe('✅ Боб');
     expect(pickerStatusLine('ru', 'Боб', { kind: 'deeplink' })).toContain('ссылку отправил тебе');
-    expect(pickerStatusLine('ru', 'Боб', { kind: 'failed' })).toContain('не доставлено');
+    expect(pickerStatusLine('ru', 'Боб', { kind: 'failed' })).toContain('прямая доставка не подтверждена');
     expect(pickerStatusLine('ru', 'Боб', { kind: 'notConfigured' })).toContain('приглашения не настроены');
     expect(pickerStatusLine('ru', 'Боб', { kind: 'error', error: 'boom' })).toBe('❌ Боб: boom');
   });
@@ -123,21 +124,34 @@ describe('pickerStatusLine', () => {
   });
 });
 
+describe('picker continuation retry guidance', () => {
+  test('an unconfirmed result does not authorize an automatic resend', () => {
+    const message = buildPickerResultMessage(
+      [{ userId: 201, firstName: 'Alice' }],
+      [pickerAiLine('Alice', 201, { kind: 'error', error: 'delivery error' })],
+    );
+    expect(message).not.toContain('MAY retry');
+    expect(message).toContain('Do not automatically resend');
+    expect(message).toContain('existing invitation status');
+    expect(message).toContain('explicit retry request');
+  });
+});
+
 describe('pickerAiLine', () => {
   test('delivered', () => {
     expect(pickerAiLine('Bob', 42, { kind: 'delivered' })).toBe('"Bob" (id:42): delivered to the invitee');
   });
   test('deeplink', () => {
     expect(pickerAiLine('Bob', 42, { kind: 'deeplink' })).toBe(
-      '"Bob" (id:42): could not reach the invitee — a forward link was sent to the inviter',
+      '"Bob" (id:42): direct delivery unconfirmed — a forward link was sent to the inviter',
     );
   });
   test('failed', () => {
-    expect(pickerAiLine('Bob', 42, { kind: 'failed' })).toBe('"Bob" (id:42): delivery failed');
+    expect(pickerAiLine('Bob', 42, { kind: 'failed' })).toBe('"Bob" (id:42): direct delivery unconfirmed');
   });
   test('error includes the reason', () => {
     expect(pickerAiLine('Bob', 42, { kind: 'error', error: 'Cannot invite yourself' })).toBe(
-      '"Bob" (id:42): invitation not created (Cannot invite yourself)',
+      '"Bob" (id:42): invitation outcome unconfirmed (Cannot invite yourself)',
     );
   });
   test('notConfigured', () => {
@@ -434,6 +448,60 @@ describe('deliverPickerInvitations (batch)', () => {
     expect(result.aiResultLines[0]).toContain('Alice');
     expect(result.aiResultLines[1]).toContain('Bob');
     expect(result.aiResultLines[2]).toContain('Carol');
+    expect(result.receipts).toEqual(
+      [201, 202, 203].map((recipientId) => ({ eventId, recipientId, outcome: 'delivered' })),
+    );
+  });
+
+  test.each([
+    { lang: 'en' as const, withLink: false },
+    { lang: 'ru' as const, withLink: false },
+    { lang: 'en' as const, withLink: true },
+    { lang: 'ru' as const, withLink: true },
+  ])('lost acknowledgement stays uncertain ($lang, link: $withLink)', async ({ lang, withLink }) => {
+    const acceptedByRemote: number[] = [];
+    const sentToInviter: string[] = [];
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async (recipientId) => {
+        // Telegram accepted the invitation, but the client never received its acknowledgement.
+        acceptedByRemote.push(recipientId);
+        throw new Error('Connection reset before acknowledgement');
+      },
+      sendMessage: async (chatId, text) => {
+        expect(chatId).toBe(INVITER_ID);
+        sentToInviter.push(text);
+        return { message_id: 1 };
+      },
+    };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter: { ...inviter, language: lang },
+        lang,
+        fallbackChatId: INVITER_ID,
+        invitees: [{ userId: 201, firstName: 'Alice' }],
+      },
+      makeDeps(sender, withLink ? {} : { deepLinkService: undefined, botUsername: undefined }),
+    );
+    expect(acceptedByRemote).toEqual([201]);
+    expect(invitationRepo.getByEvent(eventId)).toHaveLength(1);
+    expect(result.receipts).toEqual([
+      { eventId, recipientId: 201, outcome: withLink ? 'manual_forward' : 'unconfirmed' },
+    ]);
+    expect(result.aiResultLines[0]).toContain('direct delivery unconfirmed');
+    expect(result.statusLines[0]).toContain(
+      lang === 'en' ? 'direct delivery unconfirmed' : 'прямая доставка не подтверждена',
+    );
+    expect(sentToInviter).toHaveLength(1);
+    expect(sentToInviter[0]).toContain(
+      lang === 'en' ? 'Could not confirm direct delivery' : 'Не удалось подтвердить прямую доставку',
+    );
+    if (withLink) {
+      expect(sentToInviter[0]).toContain(
+        lang === 'en' ? 'If the invitation did not arrive' : 'Если приглашение не пришло',
+      );
+    }
   });
 
   test('one invitee throwing in the invitation pipeline does not abort the batch (#96)', async () => {
@@ -462,7 +530,8 @@ describe('deliverPickerInvitations (batch)', () => {
     expect(result.statusLines[2]).toBe('✅ Carol');
     // The failing invitee still produces a (failure) line — its error did not abort the batch.
     expect(result.statusLines[1]).toContain('Bob');
-    expect(result.aiResultLines[1]).toContain('invitation not created');
+    expect(result.aiResultLines[1]).toContain('invitation outcome unconfirmed');
+    expect(result.receipts[1]).toEqual({ eventId, recipientId: 202, outcome: 'unconfirmed' });
   });
 
   test('a throwing contact upsert does NOT cancel that invitee delivery (side effect is isolated)', async () => {

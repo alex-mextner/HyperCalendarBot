@@ -51,6 +51,8 @@ export const ruConnectTelegram = {
     floodWait: (minutes: number) => `Telegram ограничил запросы. Попробуй через ${minutes} мин.`,
     alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
     btnReconnect: 'Переподключить',
+    lookupNeedsConnection:
+      'Подключи свой Telegram, чтобы найти человека по @имени. Нажми «Переподключить» или используй /connect_telegram.',
     cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
     successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string) =>
       `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine})\n\nЕщё не приглашены:\n${inviteeList}`,

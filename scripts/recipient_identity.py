@@ -15,12 +15,19 @@ async def send_to_recipient(
         raise RecipientMismatch("RECIPIENT_MISMATCH: a nonzero numeric Telegram ID is required")
     if username:
         try:
-            resolved = await client.get_chat(user_id)
+            resolved_id = (await client.get_chat(user_id)).id
         except Exception as exc:
             if getattr(exc, "ID", None) != "PEER_ID_INVALID":
                 raise
-            resolved = await client.get_chat(username.strip().lstrip("@"))
-        if resolved.id != user_id:
+            from pyrogram.raw.functions.contacts import ResolveUsername
+
+            # A new session copy may retain an old username cache. Raw resolution
+            # refreshes its peer/access-hash storage through Client.invoke.
+            resolved = await client.invoke(
+                ResolveUsername(username=username.strip().lstrip("@"))
+            )
+            resolved_id = getattr(resolved.peer, "user_id", None)
+        if resolved_id != user_id:
             raise RecipientMismatch(
                 "RECIPIENT_MISMATCH: username hint cannot change the numeric recipient"
             )

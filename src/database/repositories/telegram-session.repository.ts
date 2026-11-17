@@ -70,6 +70,17 @@ export class TelegramSessionRepository {
     return result.changes > 0;
   }
 
+  /** Disconnect only the credential selected before the asynchronous Telegram logout. */
+  revokeIfCurrent(userId: number, encryptedSession: Uint8Array): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE user_telegram_sessions SET status = 'revoked', updated_at = datetime('now')
+       WHERE user_id = ? AND encrypted_session = ?`,
+      )
+      .run(userId, encryptedSession);
+    return result.changes > 0;
+  }
+
   setTzConsentAt(userId: number, at: string | null): void {
     this.db
       .prepare(

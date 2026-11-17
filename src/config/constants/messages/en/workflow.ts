@@ -18,8 +18,9 @@ export const enWorkflow = {
   writeOutcomes: {
     // What the model reads back from send_invitation: one invitation, said once.
     invitationDelivered: 'Invitation delivered',
-    invitationManual: 'Invitation created; not delivered. Please forward the link sent to your private chat.',
-    invitationFailed: 'Invitation created; not delivered.',
+    invitationManual:
+      'Invitation created; direct delivery unconfirmed. If the invitation did not arrive, forward the link sent to your private chat.',
+    invitationFailed: 'Invitation created; direct delivery unconfirmed.',
     interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
     receipt: {
       intro: 'Done in your calendar:',
@@ -67,12 +68,12 @@ export const enWorkflow = {
           : `The invitations to ${event} were created: ${who}.`,
       manual: (n: number, event: string, who: string) =>
         n === 1
-          ? `The invitation to ${event} was created but not delivered: ${who}. Please forward the link sent to your private chat.`
-          : `The invitations to ${event} were created but not delivered: ${who}. Please forward the links sent to your private chat.`,
+          ? `The invitation to ${event} was created: ${who}. Direct delivery is unconfirmed. If the invitation did not arrive, forward the link sent to your private chat.`
+          : `The invitations to ${event} were created: ${who}. Direct delivery is unconfirmed. Forward the links from your private chat only to people who did not receive an invitation.`,
       undelivered: (n: number, event: string, who: string) =>
         n === 1
-          ? `The invitation to ${event} was created but not delivered: ${who}.`
-          : `The invitations to ${event} were created but not delivered: ${who}.`,
+          ? `The invitation to ${event} was created: ${who}. Direct delivery is unconfirmed.`
+          : `The invitations to ${event} were created: ${who}. Direct delivery is unconfirmed.`,
       rejected: (n: number, event: string, who: string) =>
         n === 1
           ? `The invitation to ${event} was not sent: ${who}.`

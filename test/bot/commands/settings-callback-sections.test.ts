@@ -2,7 +2,7 @@
 // ordering-sensitive side effects that happen before a sub-action is recognised.
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { handleSettingsCallback, pendingDurationInput } from '../../../src/bot/commands/settings.ts';
-import type { NotificationPreferencesRow, User } from '../../../src/database/types.ts';
+import type { NotificationPreferencesRow, TelegramSession, User } from '../../../src/database/types.ts';
 import { stub } from '../partial-stub.ts';
 import { makeUserRow, sentMessage } from '../telegram-fixtures.ts';
 
@@ -197,11 +197,11 @@ describe('stg:set_lang / stg:set_country without a user repository', () => {
 });
 
 describe('stg Telegram account', () => {
-  function makeTelegramDeps(masterKey: Buffer | null = null) {
+  function makeTelegramDeps(masterKey: Buffer | null = null, session: TelegramSession | null = null) {
     const sessionRepo = {
-      findByUserId: mock(() => null),
-      getActive: mock(() => null),
-      updateStatus: mock(() => {}),
+      findByUserId: mock(() => session),
+      getActive: mock(() => (session?.status === 'active' ? session : null)),
+      revokeIfCurrent: mock(() => true),
     };
     const enterScene = mock(() => Promise.resolve());
     const deps: TelegramDeps = { sessionRepo: stub(sessionRepo), masterKey, enterScene };
@@ -242,14 +242,51 @@ describe('stg Telegram account', () => {
   });
 
   test('stg:tg_disconnect_confirm without a master key revokes the session locally and offers reconnect', async () => {
-    const telegram = makeTelegramDeps(null);
+    const credential = Buffer.from('synthetic encrypted session');
+    const telegram = makeTelegramDeps(null, {
+      user_id: 100,
+      encrypted_session: credential,
+      phone_masked: '+***00',
+      phone_hash: 'synthetic',
+      status: 'active',
+      tz_detection_consent_at: null,
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+    });
     const ctx = await tap('tg_disconnect_confirm', telegram.deps);
 
-    expect(telegram.sessionRepo.getActive).toHaveBeenCalledWith(100);
-    expect(telegram.sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'revoked');
+    expect(telegram.sessionRepo.findByUserId).toHaveBeenCalledWith(100);
+    expect(telegram.sessionRepo.revokeIfCurrent).toHaveBeenCalledWith(100, credential);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(markupJson(ctx)).toContain('stg:tg_connect');
     expect(markupJson(ctx)).toContain('stg:back');
+  });
+
+  test('a replacement login stays visibly connected after a stale logout response', async () => {
+    const previous: TelegramSession = {
+      user_id: 100,
+      encrypted_session: Buffer.from('old credential'),
+      phone_masked: '+***00',
+      phone_hash: 'owner',
+      status: 'active',
+      tz_detection_consent_at: null,
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+    };
+    const replacement = { ...previous, encrypted_session: Buffer.from('fresh credential'), phone_masked: '+***22' };
+    const telegram = makeTelegramDeps(null, previous);
+    let current = previous;
+    telegram.sessionRepo.findByUserId.mockImplementation(() => current);
+    telegram.sessionRepo.revokeIfCurrent.mockImplementation(() => {
+      // Another login wins the conditional revoke; the refreshed view must show that login.
+      current = replacement;
+      return false;
+    });
+    const ctx = await tap('tg_disconnect_confirm', telegram.deps);
+    expect(editedText(ctx)).toContain('Telegram: connected (+***22)');
+    expect(editedText(ctx)).not.toContain('Telegram account disconnected');
+    expect(telegram.sessionRepo.revokeIfCurrent).toHaveBeenCalledTimes(1);
+    expect(telegram.sessionRepo.revokeIfCurrent).toHaveBeenCalledWith(100, previous.encrypted_session);
   });
 
   test.each([

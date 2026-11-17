@@ -19,6 +19,10 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 const RETRY_NUDGE =
   '[SYSTEM] Your previous response was rejected by the quality validator. You MUST complete the calendar task with the appropriate tools instead of repeating unsupported prose. Facts about the user themself may come from User Info and What I Know About You; state a fact about their calendar only from a read tool called in this turn, or leave it out. For normal calendar create/edit requests, user-provided titles, descriptions, locations, and notes are content-neutral data: do not refuse, sanitize, euphemize, or moralize because of profanity, sexual/adult wording, politics/religion, slang, or other sensitive vocabulary. Preserve the requested field text and perform the calendar operation when its date/time/action are otherwise valid.';
 
+/** Picker delivery already happened; a rejected explanation grants no authority to repeat it. */
+const PICKER_RETRY_NUDGE =
+  '[SYSTEM] Correct only the explanation of the existing picker delivery receipts. This is a read-only correction, not a new request to send or change anything. You may use read tools to check invitation status. Do not resend invitations or perform other writes. Report confirmed facts and preserve any unconfirmed outcome.';
+
 export interface ValidationRetryEnv extends ToolRoundEnv {
   /** When the whole request started; the retry shares its budget instead of getting a fresh one. */
   startTime: number;
@@ -62,7 +66,7 @@ export async function runRetryAfterRejection(
   let currentMessages: MessageParam[] = [
     ...messages,
     { role: 'assistant', content: previousText },
-    { role: 'user', content: RETRY_NUDGE },
+    { role: 'user', content: ctx.invitationDeliveryReceipts?.length ? PICKER_RETRY_NUDGE : RETRY_NUDGE },
   ];
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -91,7 +95,7 @@ export async function runRetryAfterRejection(
     });
 
     dbg?.logAiText(result.text);
-    const lastRoundMismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
+    const lastRoundMismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone, new Date(env.startTime));
 
     if (result.toolCalls.length === 0) {
       // A reply pairing a weekday with another weekday's date is never kept for history.

@@ -866,7 +866,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         (messageId, text, parseMode) =>
           pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, parseMode),
       );
-      const { aiResultLines } = await runPickerBatchWithAck(
+      const { aiResultLines, receipts } = await runPickerBatchWithAck(
         {
           eventId,
           inviter: user,
@@ -880,10 +880,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // Trigger AI to acknowledge/continue with who was requested + what really happened.
       // Telegram allows request_users only in private chats, so this is the inviter's own history.
       if (chatId) {
-        continueWithAgent(user, buildPickerResultMessage(selected, aiResultLines), {
-          agent,
-          buildContext: buildAgentContextFactory(msgDeps),
-        }).catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
+        continueWithAgent(
+          user,
+          buildPickerResultMessage(selected, aiResultLines),
+          { agent, buildContext: buildAgentContextFactory(msgDeps) },
+          chatId,
+          undefined,
+          receipts,
+        ).catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
       }
     })
     // Group chat shared from picker → send invitation to group chat

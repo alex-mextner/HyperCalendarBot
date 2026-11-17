@@ -426,8 +426,9 @@ describe('deliverInvitation', () => {
     expect(inviteeText).toContain('invitation from');
     // The fallback/forwarding message goes to the inviter and must be in the inviter's language.
     const fallback = sentToInviter.join('\n');
-    expect(fallback).toContain('Перешлите ссылку получателю');
-    expect(fallback).not.toContain('Forward this link');
+    expect(fallback).toContain('Не удалось подтвердить прямую доставку');
+    expect(fallback).toContain('Если приглашение не пришло, перешлите ссылку получателю');
+    expect(fallback).not.toContain('Could not confirm direct delivery');
   });
 
   test('setMessageInfo throw after a successful send → still delivered (no false non-delivery, no duplicate)', async () => {

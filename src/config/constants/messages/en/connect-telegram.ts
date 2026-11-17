@@ -48,6 +48,8 @@ export const enConnectTelegram = {
     floodWait: (minutes: number) => `Telegram rate-limited. Try again in ${minutes} min.`,
     alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
     btnReconnect: 'Reconnect',
+    lookupNeedsConnection:
+      'Connect your Telegram account to find this person by username. Tap Reconnect or use /connect_telegram.',
     cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
     successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string) =>
       `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine})\n\nNot yet invited:\n${inviteeList}`,

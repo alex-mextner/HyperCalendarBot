@@ -21,8 +21,9 @@ export const enInvitations = {
   invite_picker_sending: '📨 Sending invitations…',
   invite_group_sending: '📨 Sending invitation…',
   invite_status_delivered: (name: string) => `✅ ${name}`,
-  invite_status_deeplink: (name: string) => `🔗 ${name} — link sent to you to forward`,
-  invite_status_failed: (name: string) => `❌ ${name} — not delivered`,
+  invite_status_deeplink: (name: string) =>
+    `🔗 ${name} — direct delivery unconfirmed; link sent to you to forward if needed`,
+  invite_status_failed: (name: string) => `⚠️ ${name} — direct delivery unconfirmed`,
   invite_status_error: (name: string, error: string) => `❌ ${name}: ${error}`,
   invite_status_not_configured: (name: string) => `❌ ${name}: invitations not configured`,
   invitation_accepted: '✅ Invitation accepted',

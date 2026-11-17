@@ -3,6 +3,7 @@ import type { TelegramSessionRepository } from '../../database/repositories/tele
 import { logger } from '../../utils/logger.ts';
 import { decryptBlob } from '../crypto/session-crypto.ts';
 import { type BridgeError, SessionBridge } from './session-bridge.ts';
+import { withTelegramSessionLock } from './session-lock.ts';
 import type { DetectionResult } from './timezone-detector.ts';
 
 const senderLogger = logger.child({ module: 'connected-user-sender' });
@@ -40,9 +41,18 @@ export interface ConnectedUserSenderDeps {
 
 interface SendMeta {
   invitationId?: number;
+  signal?: AbortSignal;
 }
 
 export async function checkTimezoneOpportunistically(
+  deps: ConnectedUserSenderDeps,
+  userId: number,
+  sessionData: Buffer,
+): Promise<void> {
+  return withTelegramSessionLock(userId, () => checkTimezoneWithCurrentSession(deps, userId, sessionData));
+}
+
+async function checkTimezoneWithCurrentSession(
   deps: ConnectedUserSenderDeps,
   userId: number,
   sessionData: Buffer,
@@ -63,7 +73,9 @@ export async function checkTimezoneOpportunistically(
 
   if (session.tz_detection_consent_at === 'never') return;
 
-  const tzTempPath = await SessionBridge.createTempSessionFile(userId, sessionData);
+  const currentData = decryptBlob(Buffer.from(session.encrypted_session), deps.masterKey);
+  if (!currentData.equals(sessionData)) return;
+  const tzTempPath = await SessionBridge.createTempSessionFile(userId, currentData);
   try {
     const authResult = await SessionBridge.getAuthorizations(tzTempPath);
     if (!authResult.success || !('authorizations' in authResult.data)) return;
@@ -93,6 +105,12 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     }
   }
 
+  /**
+   * Bookkeeping for a message that already went out, so nothing here may turn the send into a
+   * failure: the caller would then hand the inviter a forward link for an invitation the invitee
+   * already has. The send-log row belongs to the session owner (the /tg-sessions stats read it by
+   * owner); the invitee may never have started the bot and so has no users row to reference.
+   */
   function afterSuccessfulSend(
     inviterId: number,
     targetId: number,
@@ -101,13 +119,22 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     meta: SendMeta | undefined,
   ): void {
     if (deps.notifLogRepo && meta?.invitationId !== undefined) {
-      deps.notifLogRepo.insert({
-        user_id: targetId,
-        type: 'invitation_sent',
-        reference_key: `invitation_${meta.invitationId}_${targetId}_mtproto_user`,
-        channel: 'mtproto_user',
-        payload: text,
-      });
+      try {
+        const logId = deps.notifLogRepo.insert({
+          user_id: inviterId,
+          type: 'invitation_sent',
+          reference_key: `invitation_${meta.invitationId}_${targetId}_mtproto_user`,
+          channel: 'mtproto_user',
+          payload: text,
+        });
+        // The message is already out; a row left at the default 'queued' would say otherwise.
+        if (logId !== null) deps.notifLogRepo.markSent(logId);
+      } catch (err) {
+        senderLogger.warn(
+          { err, inviterId, invitationId: meta.invitationId },
+          'Sent as the connected user, but the send log was not written',
+        );
+      }
     }
 
     if (deps.onTimezoneDetected || deps.onTzConsentNeeded) {
@@ -135,32 +162,45 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     username?: string,
     meta?: SendMeta,
   ): Promise<boolean> {
-    if (isRateLimited(inviterId)) {
-      senderLogger.warn({ inviterId, targetId }, 'Rate-limited — falling back to admin session');
-      return false;
-    }
+    return withTelegramSessionLock(
+      inviterId,
+      async () => {
+        if (isRateLimited(inviterId)) {
+          senderLogger.warn({ inviterId, targetId }, 'Personal-account sending is rate-limited');
+          return false;
+        }
 
-    const session = deps.sessionRepo.getActive(inviterId);
-    if (!session) return false;
+        const session = deps.sessionRepo.getActive(inviterId);
+        if (!session) return false;
 
-    const sessionData = decryptSession(inviterId, session.encrypted_session);
-    if (!sessionData) return false;
+        const sessionData = decryptSession(inviterId, session.encrypted_session);
+        if (!sessionData) return false;
 
-    const tempPath = await SessionBridge.createTempSessionFile(inviterId, sessionData);
+        const tempPath = await SessionBridge.createTempSessionFile(inviterId, sessionData);
 
-    try {
-      const result = await SessionBridge.sendAsUser(tempPath, targetId, text, username);
-      if (result.success) {
-        afterSuccessfulSend(inviterId, targetId, text, sessionData, meta);
-        return true;
-      }
-      afterFailedSend(inviterId, session.encrypted_session, result);
-      return false;
-    } catch (err) {
-      senderLogger.error({ err, inviterId }, 'sendAsConnectedUser crashed');
-      return false;
-    } finally {
-      await SessionBridge.cleanupTempFile(tempPath);
-    }
+        try {
+          meta?.signal?.throwIfAborted();
+          const result = await SessionBridge.sendAsUser(tempPath, targetId, text, username);
+          if (result.success) {
+            afterSuccessfulSend(inviterId, targetId, text, sessionData, meta);
+            return true;
+          }
+          meta?.signal?.throwIfAborted();
+          afterFailedSend(inviterId, session.encrypted_session, result);
+          return false;
+        } catch (err) {
+          meta?.signal?.throwIfAborted();
+          senderLogger.error({ err, inviterId }, 'sendAsConnectedUser crashed');
+          return false;
+        } finally {
+          try {
+            await SessionBridge.cleanupTempFile(tempPath);
+          } catch (err) {
+            senderLogger.warn({ err, inviterId }, 'Temporary session cleanup failed after the send attempt');
+          }
+        }
+      },
+      meta?.signal,
+    );
   };
 }

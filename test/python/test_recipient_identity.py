@@ -1,22 +1,31 @@
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from recipient_identity import RecipientMismatch, send_to_recipient
+
+CONTACTS = ModuleType("pyrogram.raw.functions.contacts")
+CONTACTS.ResolveUsername = lambda **kwargs: SimpleNamespace(**kwargs)
 
 
 class FakeClient:
     def __init__(self, resolved_id=5000000001):
         self.resolved_id = resolved_id
         self.lookups = []
+        self.resolutions = []
         self.sent = []
         self.parse_modes = []
 
     async def get_chat(self, username):
         self.lookups.append(username)
         return SimpleNamespace(id=self.resolved_id)
+
+    async def invoke(self, request):
+        self.resolutions.append(request.username)
+        return SimpleNamespace(peer=SimpleNamespace(user_id=self.resolved_id))
 
     async def send_message(self, target, text, parse_mode=None):
         self.sent.append((target, text))
@@ -66,12 +75,18 @@ class RecipientIdentityTests(unittest.IsolatedAsyncioTestCase):
                 return SimpleNamespace(id=self.resolved_id)
 
         client = Unknown()
-        await send_to_recipient(client, 5000000001, "synthetic", "@hint")
-        self.assertEqual(client.lookups, [5000000001, "hint"])
+        with patch.dict(sys.modules, {"pyrogram.raw.functions.contacts": CONTACTS}):
+            await send_to_recipient(client, 5000000001, "synthetic", "@hint")
+        self.assertEqual(client.lookups, [5000000001])
+        self.assertEqual(client.resolutions, ["hint"])
         self.assertEqual(client.sent, [(5000000001, "synthetic")])
         other = Unknown(5000000002)
-        with self.assertRaises(RecipientMismatch):
+        with (
+            patch.dict(sys.modules, {"pyrogram.raw.functions.contacts": CONTACTS}),
+            self.assertRaises(RecipientMismatch),
+        ):
             await send_to_recipient(other, 5000000001, "synthetic", "@hint")
+        self.assertEqual(other.resolutions, ["hint"])
         self.assertEqual(other.sent, [])
 
     async def test_network_error_does_not_retarget_by_username(self):

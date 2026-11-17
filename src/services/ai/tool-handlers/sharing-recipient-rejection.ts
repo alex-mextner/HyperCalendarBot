@@ -6,6 +6,7 @@ import { t } from '../../../config/constants.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { issueRecipientApproval } from '../recipient-confirmation.ts';
 import type { resolveInvitationRecipient } from '../recipient-identity.ts';
+import { offerTelegramConnection } from '../telegram-connection-prompt.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { handlePickUsers } from './meta.ts';
 
@@ -145,6 +146,7 @@ export async function rejectUnresolvedRecipient(
   forOwner: boolean,
 ): Promise<ToolResult> {
   if (recipient.reason === 'contact_row_id') return contactRowIdRejection(ctx, input.event_id, recipient, forOwner);
+  if (recipient.reason === 'connection_required') return offerTelegramConnection(ctx);
   const confirmation = await requestRecipientConfirmation(ctx, input, recipient, forOwner);
   if (confirmation) return confirmation;
   if (!forOwner && (recipient.reason === 'not_found' || recipient.reason === 'unavailable') && recipient.username) {

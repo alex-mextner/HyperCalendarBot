@@ -15,7 +15,7 @@
 //  - Handler modules are imported lazily, in this order, only when REDIS_URL is set.
 
 import type { Queue } from 'bullmq';
-import type { Lang } from '../config/constants.ts';
+import { type Lang, t } from '../config/constants.ts';
 import type { runSqliteBackup } from '../database/backup.ts';
 import type { BirthdayService } from '../services/birthday/birthday-service.ts';
 import type { processExpiredEditProposals } from '../services/google/edit-proposal-expiry.ts';
@@ -155,9 +155,11 @@ function buildSessionKeepalive(
       masterKey: Buffer.from(masterKeyHex, 'hex'),
       onSessionExpired: (userId, reason) => {
         const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
-        void sendThroughBot(botRef, userId, formatSessionLoss(lang, reason), (err) =>
-          botLogger.warn({ err, userId }, 'Failed to notify user of expired session'),
-        );
+        void botRef
+          .sendMessage(userId, formatSessionLoss(lang, reason), undefined, {
+            inline_keyboard: [[{ text: t(lang).connectTelegram.btnReconnect, callback_data: 'stg:tg_connect' }]],
+          })
+          .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to notify user of expired session'));
       },
     });
   };

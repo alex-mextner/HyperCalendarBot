@@ -422,10 +422,18 @@ describe('an invitation effect without a parsable invitee', () => {
   });
 
   test.each([
-    ['failed', 'ru', 'Приглашение создано, но не доставлено.'],
-    ['failed', 'en', 'Invitation created; not delivered.'],
-    ['manual_forward', 'ru', 'Перешли ссылку из личного чата'],
-    ['manual_forward', 'en', 'forward the link'],
+    ['failed', 'ru', 'Приглашение создано; прямая доставка не подтверждена.'],
+    ['failed', 'en', 'Invitation created; direct delivery unconfirmed.'],
+    [
+      'manual_forward',
+      'ru',
+      'Приглашение создано; прямая доставка не подтверждена. Если приглашение не пришло, перешли ссылку из личного чата.',
+    ],
+    [
+      'manual_forward',
+      'en',
+      'Invitation created; direct delivery unconfirmed. If the invitation did not arrive, forward the link sent to your private chat.',
+    ],
   ] as const)('resend_invitation %s (%s) is never reported as a plain success', (delivery, language, expected) => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     ledger.record('resend_invitation', { invitation_id: 41 }, resend(delivery));
@@ -447,11 +455,11 @@ describe('an invitation effect without a parsable invitee', () => {
     });
   });
 
-  test('a send_invitation whose invitee cannot be read is told as undelivered, not as a done change', () => {
+  test('a send_invitation whose invitee cannot be read reports unconfirmed delivery', () => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     ledger.record('send_invitation', { event_id: 501, invitee_username: '!!!' }, resend('failed'));
     const evidence = receipt(ledger, secretaryContext('en')).evidence ?? '';
-    expect(evidence).toContain('Invitation created; not delivered.');
+    expect(evidence).toContain('Invitation created; direct delivery unconfirmed.');
     expect(evidence).not.toContain('Done:');
   });
 });
@@ -905,10 +913,10 @@ describe('an invitee typed in several ways is one write', () => {
     );
     const text = ledger.finalNotice(receiptViewFor('en')) ?? '';
     expect(text).toContain('was sent: @bob.');
-    expect(text).toContain('was created but not delivered: @bob.');
+    expect(text).toContain('was created: @bob. Direct delivery is unconfirmed.');
   });
 
-  test('delivered, unknown, then created but not delivered: the duplicate warning is kept', () => {
+  test('delivered, unknown, then created with unconfirmed delivery: the duplicate warning is kept', () => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     ledger.record('send_invitation', { event_id: 501, invitee_username: 'bob' }, delivered);
     ledger.record('send_invitation', { event_id: 501, invitee_username: '@bob' }, uncertain);
@@ -918,11 +926,11 @@ describe('an invitee typed in several ways is one write', () => {
       exec({ effect: { kind: 'invitation', delivery: 'failed' } }),
     );
     const text = ledger.finalNotice(receiptViewFor('en')) ?? '';
-    expect(text).toContain('was created but not delivered: @bob.');
+    expect(text).toContain('was created: @bob. Direct delivery is unconfirmed.');
     expect(text).toContain('the first try may have gone through too');
   });
 
-  test('delivered, unknown, created but not delivered, delivered again: the duplicate warning survives', () => {
+  test('delivered, unknown, created with unconfirmed delivery, delivered again: the duplicate warning survives', () => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     const created = exec({ effect: { kind: 'invitation', delivery: 'failed' } });
     ledger.record('send_invitation', { event_id: 501, invitee_username: 'bob' }, delivered);
@@ -932,7 +940,7 @@ describe('an invitee typed in several ways is one write', () => {
     expect(ledger.finalNotice(receiptViewFor('en'))).toContain('the first try may have gone through too');
   });
 
-  test('delivered, unknown, created but not delivered twice: the duplicate warning survives', () => {
+  test('delivered, unknown, created with unconfirmed delivery twice: the duplicate warning survives', () => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     const created = exec({ effect: { kind: 'invitation', delivery: 'failed' } });
     ledger.record('send_invitation', { event_id: 501, invitee_username: 'bob' }, delivered);
@@ -942,7 +950,7 @@ describe('an invitee typed in several ways is one write', () => {
     expect(ledger.finalNotice(receiptViewFor('en'))).toContain('the first try may have gone through too');
   });
 
-  test('delivered, created but not delivered, then refused: the second invitation stays told', () => {
+  test('delivered, created with unconfirmed delivery, then refused: the second invitation stays told', () => {
     const ledger = new WriteOutcomes(WRITE_TOOLS);
     ledger.record('send_invitation', { event_id: 501, invitee_username: 'bob' }, delivered);
     ledger.record(
@@ -951,7 +959,7 @@ describe('an invitee typed in several ways is one write', () => {
       exec({ effect: { kind: 'invitation', delivery: 'failed' } }),
     );
     ledger.record('send_invitation', { event_id: 501, invitee_username: 'Bob' }, eventNotFound);
-    expect(ledger.finalNotice(receiptViewFor('en'))).toContain('was created but not delivered: @bob.');
+    expect(ledger.finalNotice(receiptViewFor('en'))).toContain('was created: @bob. Direct delivery is unconfirmed.');
   });
 
   test('unknown, then refused: the unknown stays the open question', () => {

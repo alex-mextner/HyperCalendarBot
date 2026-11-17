@@ -3,6 +3,7 @@
 
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import type { InvitationDeliveryReceipt } from '../../services/ai/invitation-receipts.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 
 /** What a bot-authored continuation needs to hand a turn to the AI. */
@@ -30,10 +31,11 @@ export async function continueWithAgent(
   deps: AgentContinuationDeps,
   chatId = user.telegram_id,
   changedDays?: Set<string>,
+  invitationDeliveryReceipts?: readonly InvitationDeliveryReceipt[],
 ): Promise<void> {
   const groupInfo = chatId === user.telegram_id ? undefined : { isGroup: true, groupChatId: chatId };
   const ctx = deps.buildContext(user, chatId, text, groupInfo);
   // Private turns are stored without a chat id, like the logging middleware stores them.
   const chatHistoryId = ctx.conversationLogger.logUserMessage(user.telegram_id, text, groupInfo ? chatId : undefined);
-  await deps.agent.run({ ...ctx, chatHistoryId, ...(changedDays && { changedDays }) });
+  await deps.agent.run({ ...ctx, chatHistoryId, invitationDeliveryReceipts, ...(changedDays && { changedDays }) });
 }
