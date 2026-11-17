@@ -28,6 +28,12 @@ export interface TurnState {
   responseUnverified: boolean;
   /** The last verdict the response validator reached, `not_run` when no check applied to this turn. */
   validation: ValidationResult | { verdict: 'not_run' };
+  /**
+   * The corrective retry ended without a final answer: a stop tool ended it (skipping the rest of its
+   * round) or the request budget or round limit ran out. The run did not finish, so its writes are
+   * told with the interrupted line, not as a finished receipt.
+   */
+  retryUnfinished: boolean;
   /** Assistant prose held back until the final guard can reconcile it with execution evidence. */
   pendingHistory: MessageParam[];
 }
@@ -42,6 +48,7 @@ export function createTurnState(): TurnState {
     unresolvedWeekdays: [],
     responseUnverified: false,
     validation: { verdict: 'not_run' },
+    retryUnfinished: false,
     pendingHistory: [],
   };
 }

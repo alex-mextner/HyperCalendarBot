@@ -12,7 +12,7 @@ import {
 } from '../../../src/services/ai/agent/run-incident.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
-import type { StreamCallbacks, StreamRoundOptions } from '../../../src/services/ai/streaming.ts';
+import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { createAgentRunFixture, isValidatorCall, makeStreamImpl, type ScriptedRound } from './agent-run-helpers.ts';
 
@@ -152,7 +152,10 @@ describe('agent run incidents', () => {
 
   afterEach(() => setSystemTime());
 
-  function runWithValidator(rounds: ScriptedRound[], validator: (opts: StreamRoundOptions) => Promise<never>) {
+  function runWithValidator(
+    rounds: ScriptedRound[],
+    validator: (opts: StreamRoundOptions) => Promise<StreamRoundResult>,
+  ) {
     const script = makeStreamImpl(rounds);
     const stats = { validatorCalls: 0 };
     const impl = (opts: StreamRoundOptions, cbs?: StreamCallbacks) => {
@@ -163,6 +166,17 @@ describe('agent run incidents', () => {
       return script.impl(opts, cbs);
     };
     return { impl, stats };
+  }
+
+  async function rejectEverything(): Promise<StreamRoundResult> {
+    const reject = 'REJECT: synthetic reason';
+    return {
+      text: reject,
+      toolCalls: [],
+      finishReason: 'stop',
+      assistantMessage: { role: 'assistant', content: reject },
+      providerUsed: 'synthetic',
+    };
   }
 
   function expectNothingPrivate(text: string) {
@@ -215,6 +229,58 @@ describe('agent run incidents', () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]?.text).toContain('validator: unavailable(budget_expired)');
     expectNothingPrivate(alerts[0]?.text ?? '');
+  });
+
+  // Production 2026-11-17 (#998): the writes landed, the validator rejected the answer and then the
+  // corrective retry's answer; the run was finished, yet the reply said the request was interrupted.
+  test('a rejected answer and a rejected retry after clean writes: the receipt, no "interrupted", an unverified alert', async () => {
+    ctx.user.language = 'ru';
+    const retryRounds: ScriptedRound[] = [
+      { kind: 'tool', callId: 'r2', name: 'get_events', input: { start_date: '2035-03-05', end_date: '2035-03-05' } },
+      { kind: 'text', text: UNBACKED_PROSE },
+    ];
+    const { impl, stats } = runWithValidator([...INCIDENT_ROUNDS, ...retryRounds], rejectEverything);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+    expect(stats.validatorCalls).toBe(2);
+    expect(result.toolCalls.filter((call) => call.name === 'create_event')).toHaveLength(2);
+    const text = result.responseText;
+    expect(text).toContain(TITLE_A);
+    expect(text).toContain('09:00');
+    expect(text).toContain(TITLE_B);
+    expect(text).toContain('13:30');
+    expect(text).toContain('5 марта');
+    expect(text).not.toContain('18:45');
+    expect(text).not.toMatch(/interrupted|прерван/i);
+    expect(result.metrics?.termination).toBe('unverified');
+
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.text).toContain('Agent run incident (unverified)');
+    expect(alerts[0]?.text).toContain('validator: rejected');
+    expectNothingPrivate(alerts[0]?.text ?? '');
+  });
+
+  test.each([
+    ['runs out of rounds', 15],
+    ['is ended by a stop tool', 0],
+  ] as const)('a corrective retry that %s after clean writes still says the request was interrupted', async (_ending, reads) => {
+    const read = { start_date: '2035-03-05', end_date: '2035-03-05' };
+    const retryRounds: ScriptedRound[] = Array.from({ length: reads }, (_, i) => ({
+      kind: 'tool' as const,
+      callId: `retry-${i}`,
+      name: 'get_events',
+      input: read,
+    }));
+    if (reads === 0) retryRounds.push({ kind: 'tool', callId: 'retry-end', name: 'end_conversation', input: {} });
+    const { impl, stats } = runWithValidator([...INCIDENT_ROUNDS, ...retryRounds], rejectEverything);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: impl }).run(ctx);
+
+    expect(stats.validatorCalls).toBe(1);
+    expect(result.toolCalls.filter((call) => call.name === 'create_event')).toHaveLength(2);
+    expect(result.responseText).toContain(TITLE_A);
+    expect(result.responseText).toMatch(/interrupted/i);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.text).toContain('Agent run incident (interrupted)');
   });
 
   test('a provider failure ends the run as an error incident carrying only the error class', async () => {

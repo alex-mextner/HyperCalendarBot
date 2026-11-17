@@ -36,6 +36,8 @@ export interface ValidationRetryOutcome {
   lastRoundHadToolCalls: boolean;
   /** Weekdays the text-only last round paired with dates on other weekdays. */
   lastRoundMismatches?: WeekdayDateMismatch[];
+  /** The request budget or the round limit ended the retry before the model answered. */
+  cutShort?: true;
 }
 
 /**
@@ -78,7 +80,7 @@ export async function runRetryAfterRejection(
         recovered: false,
       });
       writer.appendText(`\n\n${t(ctx.user.language).agent_timeout}`);
-      return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
+      return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false, cutShort: true };
     }
 
     const { result, exposedThisRound } = await runModelRound({
@@ -117,7 +119,7 @@ export async function runRetryAfterRejection(
     commitToolRound(env, outcome.messages, skipPersistIds);
     currentMessages = [...currentMessages, result.assistantMessage, ...outcome.messages];
   }
-  return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: true };
+  return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: true, cutShort: true };
 }
 
 /** Persists a finished tool round's results and folds its tool lines into the execution log. */

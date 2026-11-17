@@ -22,7 +22,8 @@ export const enWorkflow = {
     invitationFailed: 'Invitation created; not delivered.',
     interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
     receipt: {
-      intro: 'Done in your calendar:',
+      // Neutral like the ru line: a secretary's receipt can name another owner's calendar.
+      intro: 'Done in the calendar:',
       created: (title: string, when: string) => `Created: "${title}" — ${when}`,
       alreadyThere: (title: string, when: string) => `Already in the calendar: "${title}" — ${when}`,
       updated: (title: string, when: string) => `Updated: "${title}" — now ${when}`,

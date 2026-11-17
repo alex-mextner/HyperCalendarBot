@@ -1,10 +1,13 @@
 // The receipt-only confirmation names every event the run wrote, from the tool results alone.
 import { describe, expect, test } from 'bun:test';
+import type { CalendarEvent } from '../../../src/database/types.ts';
 import { buildReceiptConfirmation } from '../../../src/services/ai/agent/receipt-confirmation.ts';
 import type { ToolEvidence } from '../../../src/services/ai/response-grounding.ts';
 import { WRITE_TOOLS } from '../../../src/services/ai/tool-executor.ts';
+import { eventToSummary } from '../../../src/services/ai/tool-handlers/events/presentation.ts';
 import { WriteOutcomes } from '../../../src/services/ai/write-outcomes.ts';
 import type { ReceiptView } from '../../../src/services/ai/write-receipt.ts';
+import { markdownToHtml, stripHtml } from '../../../src/utils/telegram.ts';
 
 /** A requester who has no contacts and manages no calendar: nothing is named by id. */
 function view(language: string, overrides: Partial<ReceiptView> = {}): ReceiptView {
@@ -67,14 +70,14 @@ describe('receipt-only confirmation', () => {
       },
       {
         name: 'create_event',
-        input: { title: 'Synthetic day off' },
+        input: { title: 'Synthetic review' },
         result: OK,
-        data: event('Synthetic day off', '2035-03-07', undefined, 2),
+        data: event('Synthetic review', '2035-03-07', '13:30', 2),
       },
     );
     const receipt = buildReceiptConfirmation(view('ru'), evidence, ledger) ?? '';
     expect(receipt).toContain('Создано: «Synthetic standup» — вторник, 6 марта, 09:00');
-    expect(receipt).toContain('Создано: «Synthetic day off» — среда, 7 марта, весь день');
+    expect(receipt).toContain('Создано: «Synthetic review» — среда, 7 марта, 13:30');
     expect(receipt).not.toMatch(/прерван/i);
   });
 
@@ -88,6 +91,79 @@ describe('receipt-only confirmation', () => {
     const receipt = buildReceiptConfirmation(view('en'), evidence, ledger) ?? '';
     expect(receipt.match(/Synthetic renamed/g)).toHaveLength(1);
     expect(receipt).toContain('Updated: "Synthetic renamed" — now Tuesday, March 6, 10:30');
+  });
+
+  // Telegram rejects crossed tags, so a title that renders as markdown would lose the whole reply.
+  test('a title with markdown characters is delivered as plain text', () => {
+    const title = '_x **y_ z**';
+    const { ledger, evidence } = run({
+      name: 'create_event',
+      input: { title },
+      result: OK,
+      data: event(title, '2035-03-06', '09:00'),
+    });
+    const html = markdownToHtml(buildReceiptConfirmation(view('en'), evidence, ledger) ?? '');
+    expect(html).not.toMatch(/<\/?(?:b|i|code)\b/);
+    expect(stripHtml(html)).toContain('＿x ∗∗y＿ z∗∗');
+  });
+
+  test.each([
+    'America/Los_Angeles',
+    'Europe/Belgrade',
+  ])('%s: an all-day event is confirmed through the ledger on the day it was written', (timezone) => {
+    const stored = { id: 9, title: 'Synthetic day off', start_at: '2035-03-06T00:00:00.000Z', all_day: 1 };
+    const { ledger, evidence } = run({
+      name: 'create_event',
+      input: { title: stored.title, start_at: '2035-03-06', all_day: true },
+      result: OK,
+      data: eventToSummary(stored as unknown as CalendarEvent, timezone),
+    });
+    const receipt = buildReceiptConfirmation(view('en', { timezone }), evidence, ledger) ?? '';
+    expect(receipt).toContain('Created: event “Synthetic day off” (March 6).');
+    expect(receipt).not.toContain('March 5');
+  });
+
+  test('an all-day write that carries no start falls back to the ledger summary instead of guessing a day', () => {
+    const { ledger, evidence } = run({
+      name: 'update_event',
+      input: { event_id: 9, title: 'Synthetic day off' },
+      result: OK,
+      data: event('Synthetic day off', '2035-03-05', undefined, 9),
+    });
+    const receipt = buildReceiptConfirmation(view('en', { timezone: 'America/Los_Angeles' }), evidence, ledger) ?? '';
+    expect(receipt).not.toContain('March 5');
+    expect(receipt).toContain('Updated: event, fields: title.');
+  });
+
+  test('a delete never dates an all-day event from a start its handler ignored', () => {
+    for (const start_at of ['2035-03-20', '+010000-03-06T12:00:00Z']) {
+      const { ledger, evidence } = run({
+        name: 'delete_event',
+        input: { event_id: 9, start_at },
+        result: OK,
+        data: event('Synthetic day off', '2035-03-06', undefined, 9),
+      });
+      const receipt = buildReceiptConfirmation(view('en'), evidence, ledger) ?? '';
+      expect(receipt).not.toContain('March 20');
+      expect(receipt).toContain('Deleted:');
+    }
+  });
+
+  test("a secretary's write into the owner's calendar names that calendar", () => {
+    const owner = 2002;
+    const { ledger, evidence } = run({
+      name: 'update_event',
+      input: { event_id: 7, owner_id: owner, title: 'Synthetic renamed', start_at: '2035-03-06T10:30:00Z' },
+      result: OK,
+      data: event('Synthetic renamed', '2035-03-06', '10:30', 7),
+    });
+    const delegated = view('en', {
+      calendarOwnerName: (id) => (id === owner ? 'Synthetic Owner' : null),
+      hasCalendarAccess: (id) => id === owner,
+    });
+    const receipt = buildReceiptConfirmation(delegated, evidence, ledger) ?? '';
+    expect(receipt).toContain('Synthetic Owner');
+    expect(receipt).not.toContain('your calendar');
   });
 
   test('is null with no write, a failed or uncertain write, or a write that names no event', () => {
