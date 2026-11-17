@@ -256,9 +256,9 @@ export const ruAiTools = {
       editProposalSubmitted: (id: number) =>
         `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
       deliveryFallbackWithLink: (eventTitle: string, invitee: string, url: string) =>
-        `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
+        `⚠️ Не удалось подтвердить прямую доставку приглашения для ${invitee} на «${eventTitle}». Если приглашение не пришло, перешлите ссылку получателю: ${url}`,
       deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
-        `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую.`,
+        `⚠️ Не удалось подтвердить прямую доставку приглашения для ${invitee} на «${eventTitle}».`,
       userSessionInvitation: (args: {
         title: string;
         dateLine: string;

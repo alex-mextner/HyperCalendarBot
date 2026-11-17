@@ -73,6 +73,10 @@ export function registerSettingsRoutes(dispatch: CallbackDispatch, deps: Callbac
 
   // Settings category picker
   dispatch.set('stg', async (ctx, payload, _parts, user) => {
+    if (payload === 'tg_connect' && (!ctx.message || ctx.chatId !== user.telegram_id)) {
+      await ctx.answer(t(user.language ?? 'en').connectTelegram.privateOnly);
+      return;
+    }
     if (payload === 'change_tz') {
       if (!timezoneScene) {
         cmdLogger.error('timezoneScene not wired into createCallbackHandler');

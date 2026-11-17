@@ -22,7 +22,7 @@ type ProseEvidence = Parameters<typeof shouldValidateResponse>[0];
 /** A supplement is dropped, not retried, when it states facts its own reads do not back. */
 function supplementIsRejected(env: TurnEnv, state: TurnState, evidence: ProseEvidence): boolean {
   const prose = evidence.response;
-  if (!prose || isSkipText(prose) || supplementIsGrounded(evidence)) return false;
+  if (!prose || isSkipText(prose) || supplementIsGrounded(evidence, new Date(env.startTime))) return false;
   aiLogger.info({ userId: env.ctx.user.telegram_id }, 'Supplement states facts its own reads do not back — dropped');
   state.responseUnverified = true;
   return true;
@@ -40,11 +40,13 @@ async function judge(
   prose: string,
 ): Promise<ValidationResult> {
   const verdict = await validateResponse(
-    { ...evidence, response: prose, userProfile: buildUserProfileEvidence(env.ctx) },
+    { ...evidence, response: prose, userProfile: buildUserProfileEvidence(env.ctx, new Date(env.startTime)) },
     env.validatorStream,
     {
       canAskModel: !requestBudgetSpent(env.startTime, env.requestTimeoutMs),
       timeoutMs: env.validationTimeoutMs,
+      // The agent's prompt dates "today" from the run's start; a run can cross midnight.
+      now: new Date(env.startTime),
     },
   );
   state.validation = verdict;
@@ -140,6 +142,7 @@ export async function settleFinalResponse(env: TurnEnv, state: TurnState): Promi
     timezone: ctx.user.timezone,
     tools: env.ledger.toolEvidence,
     response: state.pendingResponseText.trim(),
+    invitationDeliveryReceipts: ctx.invitationDeliveryReceipts,
   };
 
   let rejected = false;
@@ -149,7 +152,7 @@ export async function settleFinalResponse(env: TurnEnv, state: TurnState): Promi
     toolDefinitionsFor(ctx).length > 0 &&
     evidence.response &&
     !isSkipText(evidence.response) &&
-    shouldValidateResponse(evidence)
+    shouldValidateResponse(evidence, new Date(env.startTime))
   ) {
     rejected = await validateWithRetry(env, state, evidence);
   }

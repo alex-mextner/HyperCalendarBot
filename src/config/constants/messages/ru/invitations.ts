@@ -23,8 +23,9 @@ export const ruInvitations = {
   invite_picker_sending: '📨 Отправляю приглашения…',
   invite_group_sending: '📨 Отправляю приглашение…',
   invite_status_delivered: (name: string) => `✅ ${name}`,
-  invite_status_deeplink: (name: string) => `🔗 ${name} — ссылку отправил тебе для пересылки`,
-  invite_status_failed: (name: string) => `❌ ${name} — не доставлено`,
+  invite_status_deeplink: (name: string) =>
+    `🔗 ${name} — прямая доставка не подтверждена; ссылку отправил тебе, перешли её, если приглашение не пришло`,
+  invite_status_failed: (name: string) => `⚠️ ${name} — прямая доставка не подтверждена`,
   invite_status_error: (name: string, error: string) => `❌ ${name}: ${error}`,
   invite_status_not_configured: (name: string) => `❌ ${name}: приглашения не настроены`,
   invitation_accepted: '✅ Приглашение принято',

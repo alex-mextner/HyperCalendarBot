@@ -80,7 +80,15 @@ function createTzConsentPrompt(bot: Bot, db: DatabaseService): TzConsentHandler 
 function createSessionExpiredNotice(bot: Bot, db: DatabaseService): SessionExpiredHandler {
   return (userId, reason) => {
     bot.api
-      .sendMessage({ chat_id: userId, text: formatSessionLoss(userLanguage(db, userId), reason) })
+      .sendMessage({
+        chat_id: userId,
+        text: formatSessionLoss(userLanguage(db, userId), reason),
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: t(userLanguage(db, userId)).connectTelegram.btnReconnect, callback_data: 'stg:tg_connect' }],
+          ],
+        },
+      })
       .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send session expired notification'));
   };
 }

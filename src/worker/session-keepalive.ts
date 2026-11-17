@@ -2,6 +2,7 @@ import type { TelegramSessionRepository } from '../database/repositories/telegra
 import type { TelegramSession } from '../database/types.ts';
 import { decryptBlob } from '../services/crypto/session-crypto.ts';
 import { type BridgeResult, SessionBridge } from '../services/telegram-session/session-bridge.ts';
+import { withTelegramSessionLock } from '../services/telegram-session/session-lock.ts';
 import type { SessionLossReason } from '../services/telegram-session/session-loss.ts';
 import { logger } from '../utils/logger.ts';
 
@@ -85,7 +86,13 @@ export async function processSessionKeepalive(deps: SessionKeepaliveDeps): Promi
     if (index > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
     }
-    if (await checkSession(deps, ops, session)) expired++;
+    const didExpire = await withTelegramSessionLock(session.user_id, async () => {
+      const current = deps.sessionRepo.getActive(session.user_id);
+      if (!current || !Buffer.from(current.encrypted_session).equals(Buffer.from(session.encrypted_session)))
+        return false;
+      return checkSession(deps, ops, current);
+    });
+    if (didExpire) expired++;
   }
 
   keepaliveLogger.info({ checked: sessions.length, expired }, 'Session keepalive finished');

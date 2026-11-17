@@ -6,6 +6,7 @@ Subcommands:
   check_password     — enter 2FA password (read from stdin to avoid ps aux leak)
   log_out            — invalidate a Pyrogram session
   get_authorizations — return JSON array of active sessions
+  resolve_username   — resolve one public username using the connected account
 
 Exit codes: 0 = success, 1 = known error (JSON on stdout), 2 = unexpected error.
 """
@@ -18,6 +19,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 from pyrogram import Client
@@ -37,6 +39,13 @@ API_HASH = os.environ.get("MTPROTO_API_HASH", "")
 
 
 def error_json(code: str, message: str, extra: dict | None = None) -> str:
+    # Only fixed classifications enter the operational log, never protocol messages or identities.
+    if code in {"SESSION_EXPIRED", "SESSION_OWNER_MISMATCH", "AUTH_QUERY_FAILED"}:
+        reason = (extra or {}).get("reason")
+        if code == "SESSION_EXPIRED" and reason in {"revoked", "expired", "account_unavailable", "local"}:
+            logger.warning("Session query failed code=%s reason=%s", code, reason)
+        else:
+            logger.warning("Session query failed code=%s", code)
     result = {"error": code, "message": message}
     if extra:
         result.update(extra)
@@ -244,6 +253,59 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
         await disconnect_quietly(client)
 
 
+async def cmd_resolve_username(args: argparse.Namespace) -> None:
+    from pyrogram.raw.functions.contacts import ResolveUsername
+
+    client = make_client(args.session_path)
+    try:
+        await client.connect()
+        owner = await client.get_me()
+        if owner.id != args.user_id:
+            print(error_json("SESSION_OWNER_MISMATCH", "Connected account does not match requester"))
+            raise SystemExit(1)
+        # get_users('@name') may resolve through Pyrogram's stale username cache.
+        # ResolveUsername asks Telegram for the current owner of this exact public handle.
+        resolved = await client.invoke(ResolveUsername(username=args.username.lstrip('@')))
+        peer_id = getattr(resolved.peer, "user_id", None)
+        if peer_id is None:
+            print(json.dumps({"profile": None}))
+            return
+        user = next((entry for entry in resolved.users if entry.id == peer_id), None)
+        if user is None:
+            raise ValueError("Resolved user missing from response")
+        if getattr(user, "deleted", False) or not hasattr(user, "first_name"):
+            print(json.dumps({"profile": None}))
+            return
+        username = getattr(user, "username", None) or args.username
+        print(json.dumps({"profile": {
+            "id": user.id,
+            "firstName": user.first_name or username,
+            "username": username,
+        }}))
+    except Exception as error:
+        if getattr(error, "ID", "") in {"USERNAME_NOT_OCCUPIED", "USERNAME_INVALID"}:
+            print(json.dumps({"profile": None}))
+            return
+        print(authorization_failure_json(error))
+        raise SystemExit(1) from error
+    finally:
+        await disconnect_quietly(client)
+
+
+def initialize_command_log(command: str) -> str:
+    """Log operational outcomes without session data, usernames, phone numbers or auth input."""
+    path = f"/tmp/hypercal-connect-{time.time_ns()}-{os.getpid()}.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    for stream in (os.fdopen(fd, "w"), sys.stderr):
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.info("Started command=%s log=%s", command, path)
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -261,6 +323,11 @@ def main() -> None:
     p_auth = sub.add_parser("get_authorizations")
     p_auth.add_argument("--session_path", required=True)
 
+    p_resolve = sub.add_parser("resolve_username")
+    p_resolve.add_argument("--session_path", required=True)
+    p_resolve.add_argument("--user_id", type=int, required=True)
+    p_resolve.add_argument("--username", required=True)
+
     args = parser.parse_args()
 
     commands = {
@@ -268,13 +335,24 @@ def main() -> None:
         "check_password": cmd_check_password,
         "log_out": cmd_log_out,
         "get_authorizations": cmd_get_authorizations,
+        "resolve_username": cmd_resolve_username,
     }
 
+    log_path = initialize_command_log(args.command)
+    started = time.monotonic()
+    exit_code = 0
     try:
         asyncio.run(commands[args.command](args))
-    except Exception as e:
-        print(error_json("UNEXPECTED", str(e)), file=sys.stderr)
-        raise SystemExit(2) from e
+    except SystemExit as error:
+        exit_code = error.code if isinstance(error.code, int) else 1
+        raise
+    except Exception as error:
+        exit_code = 2
+        logger.error("Command failed error_type=%s", type(error).__name__)
+        print(error_json("UNEXPECTED", type(error).__name__), file=sys.stderr)
+        raise SystemExit(2) from error
+    finally:
+        logger.info("Completed command=%s rc=%s elapsed_s=%.3f log=%s", args.command, exit_code, time.monotonic() - started, log_path)
 
 
 if __name__ == "__main__":

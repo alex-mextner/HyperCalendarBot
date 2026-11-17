@@ -32,8 +32,9 @@ export function checkRoundWeekdays(
   writer: TelegramStreamWriter,
   text: string,
   timezone: string,
+  now = new Date(),
 ): WeekdayDateMismatch[] {
-  const mismatches = findWeekdayDateMismatches(text, new Date(), timezone);
+  const mismatches = findWeekdayDateMismatches(text, now, timezone);
   if (mismatches.length > 0) writer.dropDraftText();
   else writer.releaseDraft();
   return mismatches;

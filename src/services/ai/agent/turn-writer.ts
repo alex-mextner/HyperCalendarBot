@@ -37,11 +37,12 @@ export function pairsWeekdayWithOtherDate(
 }
 
 export function createTurnWriter(ctx: AgentContext, sender: TelegramSender): TelegramStreamWriter {
+  const now = new Date(ctx.turnStartedAt ?? Date.now());
   return new TelegramStreamWriter(sender, ctx.chatId, ctx.user.language, {
     userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
     noPlaceholder: ctx.isGroup,
     // A weekday next to a date is shown only after checkRoundWeekdays() found them consistent.
     holdDraftWhen: mentionsWeekday,
-    hideToolDetailsWhen: (input) => pairsWeekdayWithOtherDate(input, ctx.user.timezone),
+    hideToolDetailsWhen: (input) => pairsWeekdayWithOtherDate(input, ctx.user.timezone, now),
   });
 }

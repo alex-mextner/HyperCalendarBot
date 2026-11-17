@@ -101,7 +101,7 @@ describe('sharing handlers: failure paths', () => {
       });
     });
 
-    test('reports delivery failure with the exact hint when the bot API and deep link both fail', async () => {
+    test('reports unconfirmed delivery with the exact hint when the bot API and deep link both fail', async () => {
       const event = ownedEvent(USER_ID, 'Nobody Reached');
       const inv = fixture.invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
       const ctx = fixture.makeCtx({
@@ -116,7 +116,9 @@ describe('sharing handlers: failure paths', () => {
       const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
       expect(result.success).toBe(true);
       expect(result.effect).toEqual({ kind: 'invitation', delivery: 'failed' });
-      expect(result.agentHint).toBe('Reminder delivery failed entirely. Tell the user there was a delivery problem.');
+      expect(result.agentHint).toBe(
+        'Direct reminder delivery is unconfirmed. Do not claim definite non-delivery or automatically retry.',
+      );
     });
   });
 
@@ -134,7 +136,9 @@ describe('sharing handlers: failure paths', () => {
       expect(result.success).toBe(true);
       expect(result.mutationState).toBe('confirmed');
       expect(result.effect).toEqual({ kind: 'invitation', delivery: 'failed' });
-      expect(result.agentHint).toBe('Invitation delivery failed entirely. Tell the user there was a delivery problem.');
+      expect(result.agentHint).toBe(
+        'Direct invitation delivery is unconfirmed. Do not claim definite non-delivery or automatically retry.',
+      );
       expect(fixture.invitationRepo.getByEvent(event.id)).toHaveLength(1);
       expect(upsertCalls).toBeGreaterThan(0);
     });

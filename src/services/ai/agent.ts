@@ -118,11 +118,12 @@ export class CalendarBotAgent {
     history: ChatHistoryMessage[],
     measuredStream?: typeof aiStreamRound,
     signal?: AbortSignal,
+    now = new Date(),
   ): Promise<{ systemParts: SystemPromptParts; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The chat-logging middleware (bot/middleware/chat-logging.ts) saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    const systemParts = buildSystemPromptParts(ctx);
+    const systemParts = buildSystemPromptParts(ctx, now);
     const rows = relevantHistoryRows(ctx, history, 50);
     const messages = await buildHistoryMessages(ctx, rows, { summarizer: this.summarizer, measuredStream, signal });
     // The retry question is judged against the newest saved row, before regrouping moved anything to the end.
@@ -238,9 +239,10 @@ export class CalendarBotAgent {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30, ctx.deferredTurnRowIds?.());
     // A bare "Да" answers the ask_user of the conversation it was saved to: the group's own.
     const turnHistory = relevantHistoryRows(ctx, history, 30);
-    ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
+    const now = new Date(env.startTime);
+    ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, now, ctx.user.timezone);
     const { systemParts, messages: rawHistoryMessages } = await waitForAbort(
-      () => this.buildMessages(ctx, history, summaryStream, requestSignal),
+      () => this.buildMessages(ctx, history, summaryStream, requestSignal, now),
       requestSignal,
     );
     const summarizer = this.summarizer;
@@ -260,7 +262,9 @@ export class CalendarBotAgent {
     // The request budget below counts from the moment this turn is given the chat, not from arrival.
     prepareQueuedTurn(ctx, slot);
     const startTime = Date.now();
+    ctx.turnStartedAt = startTime;
     const requestSignal = AbortSignal.any([AbortSignal.timeout(this.requestTimeoutMs), this.shutdown.signal]);
+    ctx.requestSignal = requestSignal;
     const requestMetrics = new AgentRequestMetrics();
     const requestId = requestMetrics.requestId;
     aiLogger.info(

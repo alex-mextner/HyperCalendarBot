@@ -447,8 +447,9 @@ export function checkQuestionWeekdays(ctx: AgentContext, toolName: string, input
   const parsed = AskUserInput.safeParse(input);
   if (!parsed.success) return undefined;
   // Each button is its own line of text: a weekday option above a date option is no pair.
+  const now = new Date(ctx.turnStartedAt ?? Date.now());
   const mismatches = [parsed.data.question, ...(parsed.data.options ?? [])].flatMap((part) =>
-    findWeekdayDateMismatches(part, new Date(), ctx.user.timezone),
+    findWeekdayDateMismatches(part, now, ctx.user.timezone),
   );
   if (mismatches.length === 0) return undefined;
   return {

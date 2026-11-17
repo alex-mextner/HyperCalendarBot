@@ -46,6 +46,7 @@ import type { StressDictionary } from '../voice/stress-dictionary.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import type { RunIncidentReporter } from './agent/run-incident.ts';
 import type { DayReferenceSet } from './day-references.ts';
+import type { InvitationDeliveryReceipt } from './invitation-receipts.ts';
 import type { ToolSchemaMode } from './tool-schema-mode.ts';
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,10 @@ export interface AgentContext {
   topicThreadId?: number;
   onBotResponse?: (messageId: number) => void;
   sender?: TelegramSender;
+  /** This agent run's cancellation, also checked by queued personal-session operations. */
+  requestSignal?: AbortSignal;
+  /** Captured run instant for interpreting dates consistently across prompts, tools and replies. */
+  turnStartedAt?: number;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
   /** Queues pictures for background delivery as their own message; absent when rendering is off (no Redis, no browser). */
@@ -244,6 +249,8 @@ export interface AgentContext {
   /** Local 'YYYY-MM-DD' start days (ctx.user.timezone) of events created, updated or deleted in this run. */
   changedDays?: Set<string>;
   supplementMode?: boolean;
+  /** Transport outcomes passed by the picker handler; text alone never creates delivery evidence. */
+  invitationDeliveryReceipts?: readonly InvitationDeliveryReceipt[];
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;
   /**
@@ -476,7 +483,7 @@ export interface TelegramSender {
     targetId: number,
     text: string,
     username?: string,
-    meta?: { invitationId?: number },
+    meta?: { invitationId?: number; signal?: AbortSignal },
   ): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;

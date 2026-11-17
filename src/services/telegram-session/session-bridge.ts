@@ -52,6 +52,15 @@ const AuthorizationSchema = z.object({
 });
 
 const GetAuthorizationsSchema = z.object({ authorizations: z.array(AuthorizationSchema) });
+const ResolveUsernameSchema = z.object({
+  profile: z
+    .object({
+      id: z.number().int().positive().safe(),
+      firstName: z.string().optional(),
+      username: z.string().optional(),
+    })
+    .nullable(),
+});
 
 const SuccessSchema = z.union([
   SendCodeSchema,
@@ -60,6 +69,7 @@ const SuccessSchema = z.union([
   SendAsUserSchema,
   LogOutSchema,
   GetAuthorizationsSchema,
+  ResolveUsernameSchema,
 ]);
 
 export type BridgeSuccessData = z.infer<typeof SuccessSchema>;
@@ -96,11 +106,14 @@ export type BridgeResult = BridgeSuccess | BridgeError;
 
 // --- Internal spawn helper ---
 
-async function spawnBridge(args: string[], stdinData?: Buffer): Promise<BridgeResult> {
+async function spawnBridge(args: string[], stdinData?: Buffer, signal?: AbortSignal): Promise<BridgeResult> {
+  signal?.throwIfAborted();
   const proc = Bun.spawn([PYTHON_PATH, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: stdinData ?? undefined,
+    // Only read-only username lookup supplies a signal; active sends keep their acknowledgement semantics.
+    ...(signal ? { signal, killSignal: 'SIGKILL' } : {}),
   });
 
   const startedAt = performance.now();
@@ -113,15 +126,18 @@ async function spawnBridge(args: string[], stdinData?: Buffer): Promise<BridgeRe
     });
     proc.kill();
   }, SPAWN_TIMEOUT_MS);
+  const completion = [new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited] as const;
   try {
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const [stdout, stderr, exitCode] = await Promise.all(completion);
+    signal?.throwIfAborted();
     return parseResult(stdout, stderr, exitCode);
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
   } finally {
     clearTimeout(timeout);
+    // A cancelled read must reap its child and settle both pipes before the owner queue can advance.
+    if (signal?.aborted) await Promise.allSettled(completion);
   }
 }
 
@@ -216,6 +232,29 @@ async function logOut(sessionPath: string): Promise<BridgeResult> {
 /** List active Telegram sessions/authorizations. */
 async function getAuthorizations(sessionPath: string): Promise<BridgeResult> {
   return spawnBridge([CONNECT_SCRIPT, 'get_authorizations', '--session_path', sessionPath]);
+}
+
+/** Resolve one public username with the requester's own session, checking its Telegram identity. */
+async function resolveUsernameAsUser(
+  sessionPath: string,
+  userId: number,
+  username: string,
+  signal?: AbortSignal,
+): Promise<BridgeResult> {
+  return spawnBridge(
+    [
+      CONNECT_SCRIPT,
+      'resolve_username',
+      '--session_path',
+      sessionPath,
+      '--user_id',
+      userId.toString(),
+      '--username',
+      username,
+    ],
+    undefined,
+    signal,
+  );
 }
 
 /** Send a message as the connected user. */
@@ -419,6 +458,7 @@ export const SessionBridge = {
   checkPassword,
   logOut,
   getAuthorizations,
+  resolveUsernameAsUser,
   sendAsUser,
   cleanupTempFile,
 };

@@ -179,12 +179,18 @@ describe('CalendarBotAgent.run()', () => {
     const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
     expect(db.query('SELECT id FROM invitations WHERE event_id = ?').all(event.id)).toHaveLength(1);
     expect(result.responseText).toContain(
-      { delivered: 'was sent', manual: 'Please forward the link', failed: 'created but not delivered' }[delivery],
+      {
+        delivered: 'was sent',
+        manual:
+          'Direct delivery is unconfirmed. If the invitation did not arrive, forward the link sent to your private chat.',
+        failed: 'Direct delivery is unconfirmed.',
+      }[delivery],
     );
     expect(result.responseText).not.toContain('789');
     expect(result.responseText).not.toContain('<b>private');
     expect(result.responseText).not.toContain('https://');
     if (delivery === 'manual') expect(privateMessages.join('')).toContain('https://t.me/');
+    else expect(result.responseText).not.toMatch(/\bforward\b/i);
     const groupHistory = ctx.chatHistory.getRecentByChat(ctx.chatId);
     expect(groupHistory.some((row) => row.role === 'tool')).toBe(true);
     expect(JSON.stringify(groupHistory)).toContain(

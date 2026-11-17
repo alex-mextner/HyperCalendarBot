@@ -93,8 +93,8 @@ const SEND_DELIVERY_HINTS: Record<DeliveryState, string> = {
   delivered:
     "The invitation was delivered to the invitee via bot API or the inviter's own Telegram account. Tell the user it is sent.",
   manual_forward:
-    'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.',
-  failed: 'Invitation delivery failed entirely. Tell the user there was a delivery problem.',
+    'Direct delivery is unconfirmed. A forwarding link was sent to the inviter. Tell the user to forward it only if the invitation did not arrive.',
+  failed: 'Direct invitation delivery is unconfirmed. Do not claim definite non-delivery or automatically retry.',
 };
 
 const SEND_OUTCOME_KEYS = {
@@ -253,16 +253,25 @@ async function createAndDeliverInvitation(
 ): Promise<ToolResult> {
   const { organizerId, actingForOwner, event } = scope;
   const isGroupTarget = recipient.isGroup;
+  if (ctx.requestSignal?.aborted) {
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'Request ended before invitation creation. No invitation was created.',
+    };
+  }
   const result = invitationService.sendInvitation(input.event_id, organizerId, recipient.id, recipient.username);
   if (!result.success) {
     return { success: false, mutationState: 'not_applied', error: result.error };
   }
 
   const invitation = result.invitation!;
-  addInviteeToContacts(ctx, invitation.id, recipient);
+  if (!ctx.requestSignal?.aborted) addInviteeToContacts(ctx, invitation.id, recipient);
 
-  const delivery: InvitationDeliveryResult = ctx.sender
-    ? await deliverInvitationFromContext(ctx, sharing, ctx.sender, {
+  let delivery: InvitationDeliveryResult = { delivered: false, viaDeepLink: false, viaBotApi: false };
+  try {
+    if (ctx.sender && !ctx.requestSignal?.aborted) {
+      delivery = await deliverInvitationFromContext(ctx, sharing, ctx.sender, {
         invitationId: invitation.id,
         eventId: input.event_id,
         inviteeId: recipient.id,
@@ -270,13 +279,18 @@ async function createAndDeliverInvitation(
         event,
         isGroupTarget,
         organizerId,
-      })
-    : { delivered: false, viaDeepLink: false, viaBotApi: false };
+      });
+    }
+  } catch (error) {
+    if (!ctx.requestSignal?.aborted) throw error;
+    // The row already exists. Keep that confirmed creation (and its ID) even when
+    // cancellation stops delivery; the tool round records it before ending the request.
+  }
 
   // /connect_telegram would not help here: a secretary's connected account never sends for the owner.
   const connectSuggestion = actingForOwner
     ? null
-    : connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
+    : await connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id);
   const state = deliveryState(delivery);
 
   return {
@@ -410,8 +424,9 @@ function currentResendScope(
 
 const RESEND_DELIVERY_HINTS: Record<DeliveryState, string> = {
   delivered: 'The invitation reminder was delivered to the invitee. Tell the user it is sent.',
-  manual_forward: 'Bot-API reminder failed. Deep-link fallback sent to the inviter.',
-  failed: 'Reminder delivery failed entirely. Tell the user there was a delivery problem.',
+  manual_forward:
+    'Direct reminder delivery is unconfirmed. A forwarding link was sent to the inviter; forward it only if the reminder did not arrive.',
+  failed: 'Direct reminder delivery is unconfirmed. Do not claim definite non-delivery or automatically retry.',
 };
 
 export async function handleResendInvitation(
@@ -478,7 +493,7 @@ export async function handleResendInvitation(
   // A secretary's connected account never sends for the owner, so /connect_telegram would not help.
   const connectSuggestion =
     organizerId === ctx.user.telegram_id
-      ? connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id)
+      ? await connectSuggestionAfterDelivery(ctx, delivery, isGroupTarget, invitation.id)
       : null;
   const state = deliveryState(delivery);
   return {

@@ -145,7 +145,7 @@ export async function runRoundLoop(env: TurnEnv, state: TurnState): Promise<void
     );
     dbg?.logAiText(result.text);
 
-    const mismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone);
+    const mismatches = checkRoundWeekdays(writer, result.text, ctx.user.timezone, new Date(env.startTime));
     const step =
       result.toolCalls.length === 0
         ? settleToollessRound(env, state, round, result, mismatches)

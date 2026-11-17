@@ -148,7 +148,7 @@ describe('sharing tool handlers', () => {
       expect(sentToInviter).toHaveLength(0);
     });
 
-    test('sender without sendInvitation capability → succeeds but reports delivery failed (consistent guard)', async () => {
+    test('sender without sendInvitation capability → succeeds but reports unconfirmed delivery (consistent guard)', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'No Capability Resend',
@@ -157,7 +157,7 @@ describe('sharing tool handlers', () => {
       });
       const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
       // A sender object is present but lacks sendInvitation — deliverInvitation tolerates this and
-      // reports non-delivery, mirroring handleSendInvitation's `if (ctx.sender)` guard.
+      // reports an unconfirmed outcome, mirroring handleSendInvitation's `if (ctx.sender)` guard.
       const ctx = makeCtx({
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
@@ -166,7 +166,9 @@ describe('sharing tool handlers', () => {
       });
       const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
       expect(result.success).toBe(true);
-      expect(result.agentHint).toContain('failed');
+      expect(result.agentHint).toBe(
+        'Direct reminder delivery is unconfirmed. Do not claim definite non-delivery or automatically retry.',
+      );
     });
   });
 

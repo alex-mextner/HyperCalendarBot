@@ -51,6 +51,8 @@ export interface DeliverInvitationParams {
    *  telegram_id, so it can never be accepted on behalf of a group — reporting "link sent" would
    *  be a lie. On Bot-API failure the result is an honest non-delivery (viaDeepLink: false). */
   isGroupTarget?: boolean;
+  /** Stop pending delivery and fallback work when the originating agent request ends. */
+  signal?: AbortSignal;
   deps: InvitationDeliveryDeps;
 }
 
@@ -123,13 +125,14 @@ function buildUserSessionSend(
   if (!allowInviterSession || !event || !url || !sendAsConnected) return undefined;
   const userFirstPersonText = buildUserSessionInvitationText({ event, inviterTimezone, deepLink: url, lang });
   return async (targetId, _text, username) =>
-    sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId });
+    sendAsConnected(inviterId, targetId, userFirstPersonText, username, { invitationId, signal: params.signal });
 }
 
 function buildBotSend(params: DeliverInvitationParams): DeliverMessageParams['botSend'] {
   const { inviteeId, event, isGroupTarget = false, invitationId, eventId, lang } = params;
   const { sender } = params.deps;
   return async (recipientId, msgText) => {
+    params.signal?.throwIfAborted();
     if (recipientId !== inviteeId) return sender.sendMessage(recipientId, msgText);
     if (!sender.sendInvitation) throw new Error('sendInvitation not available');
     // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
@@ -187,6 +190,7 @@ function reportDeliveryOutcome(
 }
 
 export async function deliverInvitation(params: DeliverInvitationParams): Promise<InvitationDeliveryResult> {
+  params.signal?.throwIfAborted();
   const { invitationId, eventId, inviteeId, inviteeUsername, event, inviterLang, fallbackChatId, deps } = params;
   const { sender, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
   if (!sender.sendInvitation) return { ...NOT_DELIVERED };
@@ -235,8 +239,11 @@ export async function deliverInvitation(params: DeliverInvitationParams): Promis
       userSessionSend: buildUserSessionSend(params, url),
       suppressFallback: params.isGroupTarget ?? false,
     });
+    // An acknowledgement is durable evidence even when the request expired during the send.
+    if (!result.delivered && !result.fallbackSent) params.signal?.throwIfAborted();
     return reportDeliveryOutcome(params, result, url);
   } catch (error) {
+    params.signal?.throwIfAborted();
     // Sanitize: a thrown Telegram/API error can attach the full request body (incl. the deep
     // link) as enumerable props; describeDeliveryError reads only safe scalar fields.
     deliveryLogger.error({ invitationId, inviteeId, err: describeDeliveryError(error) }, 'Delivery chain failed');

@@ -1,8 +1,12 @@
 import type { Contact } from '../../database/types.ts';
 import { reportTimeout } from '../incident/timeout-reporter.ts';
+import {
+  resolveWithConnectedUser,
+  TelegramConnectionRequiredError,
+} from '../telegram-session/connected-user-resolver.ts';
 import type { TelegramProfile } from '../telegram-session/service-tier.ts';
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
-import { cachedRecipientProfile } from './recipient-profile.ts';
+import { cachedRecipientProfile, rememberResolvedRecipient } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -33,7 +37,7 @@ export function isKnownRecipient(ctx: AgentContext, id: number): boolean {
 export interface FoundUser {
   id: number;
   firstName?: string;
-  username: string;
+  username?: string;
 }
 
 /** Resolves a normalized @username against people who have started this bot (the users table only).
@@ -48,32 +52,61 @@ export type UsernameLookup =
   | { status: 'found'; user: FoundUser }
   /** Telegram answered that no account has this username. */
   | { status: 'not_found' }
-  /** The username could not be looked up: without the service account only people who started this
-   *  bot can be, and a service lookup can fail. Says nothing about whether the person exists. */
+  /** The live lookup could not run. Says nothing about whether the person exists. */
   | { status: 'unavailable' }
+  /** No usable personal session exists and the requester can reconnect it. */
+  | { status: 'connection_required' }
   /** The service account answered with an ID that names no real person. */
   | { status: 'unverified' };
 
-/** Looks up an exact normalized @username. With the service account (ctx.resolveUsername) Telegram's
- *  answer wins over the users table, which may hold a stale username; without it only the users table
- *  is consulted. */
+function recordResolvedUsername(
+  ctx: AgentContext,
+  username: string,
+  profile: TelegramProfile | null,
+  source: 'service' | 'personal',
+): UsernameLookup {
+  if (!profile) return { status: 'not_found' };
+  if (!Number.isSafeInteger(profile.id) || profile.id <= 0) return { status: 'unverified' };
+  rememberResolvedRecipient(ctx, { ...profile, username: profile.username ?? username }, source);
+  const selected = cachedRecipientProfile(ctx, profile.id) ?? profile;
+  if (selected.id !== profile.id || selected.deleted) return { status: 'unverified' };
+  return {
+    status: 'found',
+    user: { id: profile.id, firstName: selected.firstName, username: selected.username },
+  };
+}
+
+/** Looks up an exact normalized username through the service tier or the requester's own session.
+ * Live Telegram answers take precedence over cached bot users, whose usernames may be stale. */
 export async function lookUpUsername(ctx: AgentContext, username: string): Promise<UsernameLookup> {
-  if (!ctx.resolveUsername) {
+  const signal = ctx.requestSignal;
+  signal?.throwIfAborted();
+  const sessionRepo = ctx.telegramSessionRepo;
+  const masterKey = ctx.telegramMasterKey;
+  const serviceResolve = ctx.resolveUsername;
+  const resolve =
+    serviceResolve ??
+    (sessionRepo && masterKey
+      ? (handle: string) => resolveWithConnectedUser(sessionRepo, masterKey, ctx.user.telegram_id, handle, signal)
+      : undefined);
+  if (!resolve) {
     const known = lookupKnownBotUser(ctx, username);
     return known ? { status: 'found', user: known } : { status: 'unavailable' };
   }
   let profile: TelegramProfile | null;
   try {
-    profile = await ctx.resolveUsername(username);
-  } catch {
+    profile = await resolve(username);
+    signal?.throwIfAborted();
+  } catch (err) {
+    signal?.throwIfAborted();
+    if (err instanceof TelegramConnectionRequiredError) {
+      const known = lookupKnownBotUser(ctx, username);
+      return known ? { status: 'found', user: known } : { status: 'connection_required' };
+    }
+    // An unavailable live lookup must not turn a cached username into authoritative identity.
     return { status: 'unavailable' };
   }
-  if (!profile) return { status: 'not_found' };
-  if (!Number.isSafeInteger(profile.id) || profile.id <= 0) return { status: 'unverified' };
-  return {
-    status: 'found',
-    user: { id: profile.id, firstName: profile.firstName, username: profile.username ?? username },
-  };
+  return recordResolvedUsername(ctx, username, profile, serviceResolve ? 'service' : 'personal');
 }
 
 /** Records that this run established `id` as a real recipient, so later tool calls may address it. */
@@ -87,7 +120,7 @@ type RecipientResolution =
   | { ok: false; reason: 'contact_row_id'; contact: Contact }
   | {
       ok: false;
-      reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable';
+      reason: 'unverified' | 'conflict' | 'not_found' | 'unavailable' | 'connection_required';
       username?: string;
       candidate?: { id: number; firstName?: string; username?: string };
     };
@@ -195,7 +228,7 @@ async function resolveRecipientByUsername(
   const username = normalizeRecipientUsername(invitee_username);
   if (!canResolveRecipientUsername(ctx, username)) return UNVERIFIED;
   const lookup = await lookUpUsername(ctx, username);
-  if (lookup.status === 'not_found' || lookup.status === 'unavailable')
+  if (lookup.status === 'not_found' || lookup.status === 'unavailable' || lookup.status === 'connection_required')
     return { ok: false, reason: lookup.status, username };
   if (lookup.status === 'unverified') return UNVERIFIED;
   const resolved = lookup.user;
@@ -210,7 +243,7 @@ function resolveRecipientByKnownId(
   establishedInvitationRecipientId?: number,
 ): RecipientResolution {
   if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id))) return UNVERIFIED;
-  const profile = ctx.lookupTelegramUser ? cachedRecipientProfile(ctx, id) : null;
+  const profile = cachedRecipientProfile(ctx, id);
   if (profile) {
     if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
     ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {

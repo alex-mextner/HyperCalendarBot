@@ -181,16 +181,27 @@ list group members (`get-chat-members.py`), fetch birthdays (`fetch-birthdays.py
 reminders (`voice-call-bridge.py`). It has **no send operation**: a service account never messages
 anyone. Consumers receive the tier (or functions bound from it); they never read the env, check the
 session file or name a service script — all service script paths live in `service-tier.ts`.
-With the tier disabled: `find_user`/`send_invitation` use the local `users` table and otherwise the
-picker; group members come from `group_members`; birthday auto-sync and voice calls are off
+With the tier disabled: `find_user`/`send_invitation` resolve an explicitly requested username through
+that requester's own active session. Without a personal session they use known bot users, or offer a
+private reconnect button. Transient lookup failures preserve the connection and offer the picker.
+Group members come from `group_members`; birthday auto-sync and voice calls are off
 (`make_call` is hidden). Prod never set `MTPROTO_SERVICE_USER_ID`, so the tier is off there; Telegram
 may block such accounts.
 
 **Per-user tier** — an invitation to someone who never started the bot goes
 Bot API → the **inviter's own** connected session (`scripts/send-as-user.py`, spawned per send with a
 decrypted temp copy of that user's row in `user_telegram_sessions`) → a deep link sent to the inviter to
-forward. A user's session is only ever used for that user's own sends; never for anyone else and never
-copied into the shared service file.
+forward. A user's session is used only for their own sends and exact public-username lookups they request;
+it is never borrowed for anyone else or copied into the shared service file. Lookup, sending,
+timezone checks, keepalive and logout share a per-owner queue in the bot process. Each queued
+operation reads the current credential, and expiry/logout changes are conditional on the checked
+credential, so a late response cannot invalidate a replacement login.
+
+**Picker continuations** — selected Telegram profiles are saved before the AI continuation, preserving
+existing preferred names. Trusted delivery receipts make the entire continuation read-only, including
+provider fallback and automatic rewrites. The picker has no trusted requested-alias metadata, so the
+agent must not infer or save an alias from history or claim that it changed one. An explicit subsequent
+user request can update the preferred name through the normal contact handler.
 
 **`voice_caller.session` fragility**: the service scripts share one Pyrogram SQLite session file
 (journal mode DELETE, not WAL) and serialize on `scripts/mtproto_lock.py`. Concurrent `app.stop()` →

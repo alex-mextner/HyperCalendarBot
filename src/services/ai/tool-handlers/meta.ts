@@ -8,6 +8,7 @@ import {
   normalizeRecipientUsername,
 } from '../recipient-identity.ts';
 import { correctAskedQuestion, eventClocksForRun } from '../reply-time-guard.ts';
+import { offerTelegramConnection } from '../telegram-connection-prompt.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handleDeleteConfirmationRequest } from './events.ts';
 
@@ -59,9 +60,10 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
   if (lookup.status === 'found') {
     const { user } = lookup;
     markVerifiedRecipient(ctx, user.id);
-    const name = user.firstName ?? user.username;
+    const name = user.firstName ?? user.username ?? String(user.id);
     return { success: true, output: tr.foundUser(user.id, name), data: { telegram_id: user.id, name } };
   }
+  if (lookup.status === 'connection_required') return offerTelegramConnection(ctx);
   if (lookup.status === 'unverified') return { success: false, error: tr.recipientUnverified };
   if (lookup.status === 'not_found') {
     return {

@@ -11,6 +11,7 @@ import type { TelegramSession, User } from '../../database/types.ts';
 import { decryptBlob } from '../../services/crypto/session-crypto.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
+import { withTelegramSessionLock } from '../../services/telegram-session/session-lock.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
@@ -608,13 +609,32 @@ async function disconnectTelegramAccount(
   lang: 'en' | 'ru',
   telegramDeps: TelegramSettingsDeps,
 ): Promise<void> {
-  const session = telegramDeps.sessionRepo.getActive(user.telegram_id);
-  if (session && telegramDeps.masterKey) {
-    await revokeRemoteSession(session, telegramDeps.masterKey, user.telegram_id);
+  const selected = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
+  try {
+    await ctx.answer();
+  } catch (err) {
+    cmdLogger.warn(
+      { userId: user.telegram_id, errorName: err instanceof Error ? err.name : 'unknown' },
+      'Telegram disconnect callback acknowledgement failed',
+    );
   }
-  telegramDeps.sessionRepo.updateStatus(user.telegram_id, 'revoked');
+  const revoked = await withTelegramSessionLock(user.telegram_id, async () => {
+    const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
+    if (!session) return true;
+    if (!selected || !Buffer.from(session.encrypted_session).equals(Buffer.from(selected.encrypted_session))) {
+      return false;
+    }
+    if (session.status === 'active' && telegramDeps.masterKey) {
+      await revokeRemoteSession(session, telegramDeps.masterKey, user.telegram_id);
+    }
+    return telegramDeps.sessionRepo.revokeIfCurrent(user.telegram_id, session.encrypted_session);
+  });
+  if (!revoked) {
+    const view = buildTelegramView(telegramDeps.sessionRepo.findByUserId(user.telegram_id), lang);
+    await ctx.editText(view.text, { reply_markup: view.kb });
+    return;
+  }
   const s = t(lang).settings;
-  await ctx.answer();
   await ctx.editText(s.telegramDisconnected, {
     reply_markup: new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect').row().text(s.back, 'stg:back'),
   });

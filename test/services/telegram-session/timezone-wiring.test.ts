@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { TelegramSessionRepository } from '../../../src/database/repositories/telegram-session.repository.ts';
 import type { TelegramSession } from '../../../src/database/types.ts';
+import { encryptBlob } from '../../../src/services/crypto/session-crypto.ts';
 import {
   type ConnectedUserSenderDeps,
   checkTimezoneOpportunistically,
@@ -19,7 +20,7 @@ function makeMockSessionRepo(
       if (!session) return null;
       return {
         user_id: 100,
-        encrypted_session: Buffer.from('enc'),
+        encrypted_session: encryptBlob(SESSION_DATA, MASTER_KEY),
         phone_masked: '+7 ••• 0000',
         phone_hash: 'abc',
         status: 'active' as const,
