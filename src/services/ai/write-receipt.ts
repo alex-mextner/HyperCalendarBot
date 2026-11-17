@@ -153,7 +153,7 @@ export interface ReceiptView {
  * receipt would never arrive. Those characters become look-alikes, and line breaks collapse so
  * a title cannot pass itself off as another receipt line.
  */
-function inert(text: string): string {
+export function inert(text: string): string {
   return text.replace(/\s+/g, ' ').trim().replace(/\*/g, '∗').replace(/_/g, '＿').replace(/`/g, 'ˋ');
 }
 

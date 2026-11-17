@@ -63,20 +63,26 @@ friendly invention.
 The reference implementation of the empty-calendar wording is
 `src/services/ai/empty-agenda.ts`, called from the `get_events` tool handler.
 
-## Receipt-only confirmation after a validator outage
+## Receipt-only confirmation after a validator outage or rejection
 
 When the response validator cannot reach a verdict (timeout, provider error, spent request budget)
 and the run already changed the calendar, the bot does not send the model's prose and does not
-retry with tools. It sends a confirmation built only from the run's own write results
+retry with tools. When the validator rejects the answer and the corrective retry's answer is not
+approved either, the model's prose is dropped the same way. In both cases a finished run whose
+writes all landed sends a confirmation built only from the run's own write results
 (`buildReceiptConfirmation`, `src/services/ai/agent/receipt-confirmation.ts`). Required wording:
 
 - Russian, direct, one line per change: the verb of what happened (Создано / Изменено / Удалено),
-  the exact title in «», and the local weekday, day and clock time (or "весь день") taken from the
-  write result in the user's timezone, e.g. `Создано: «Synthetic standup» — вторник, 6 марта, 09:00`.
+  the exact title in «» (markdown characters made inert), and the local weekday, day and clock time
+  taken from the write result in the user's timezone, e.g.
+  `Создано: «Synthetic standup» — вторник, 6 марта, 09:00`. An all-day event, a write into another
+  owner's calendar or a write whose result names no event is told by the write ledger's receipt
+  instead (`Создано: событие «…» (7 марта).`): it dates an all-day event from what was written,
+  where the result summary can name the day before west of UTC, and it names the other calendar.
 - Honest scope: it says these facts come from the calendar itself and that the written answer could
   not be checked, so it is not sent, and that repeating the request is unnecessary. It never says
   "Запрос прерван" or "Часть действий могла уже выполниться" when every write succeeded; an
-  outage is not a failure of the run.
+  outage or a rejected answer is not a failure of the run.
 - Nothing the model invented: no free windows, no counts, no advice. A write that failed or whose
   outcome is unknown keeps the guard notice with the failure named instead of this confirmation.
 

@@ -115,6 +115,7 @@ async function validateWithRetry(env: TurnEnv, state: TurnState, evidence: Prose
   const retryOutcome = await runRetryAfterRejection(env, state.currentMessages, evidence.response);
 
   if (retryOutcome.hitStopLoop) state.termination = retryOutcome.waiting ? 'waiting' : 'stop';
+  state.retryUnfinished = retryOutcome.hitStopLoop || retryOutcome.cutShort === true;
 
   // A retry is not approval. Keep unverified text out of both delivery
   // and history on rejection, timeout, exhaustion, or an early stop.

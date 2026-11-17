@@ -187,7 +187,8 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     );
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
-    expect(result.responseText).toContain('Created: event');
+    expect(result.responseText).toContain('Created: "Synthetic evidence test"');
+    expect(result.responseText).not.toMatch(/interrupted/i);
     expect(result.toolCalls.filter((call) => call.name === 'create_event')).toHaveLength(1);
     expect(result.toolResults[0]?.success).toBe(true);
     const count = db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM events').get();

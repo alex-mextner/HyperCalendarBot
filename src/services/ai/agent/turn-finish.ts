@@ -55,14 +55,17 @@ export function planGuard(ctx: AgentContext, state: TurnState, runFailed: boolea
   const { writeOutcomes, toolEvidence } = ledger;
   const { termination, responseUnverified } = state;
   const view = receiptView(ctx);
-  // A validator outage says nothing about the answer and never justifies "interrupted": when every
-  // write of a finished run landed cleanly, the reply is a receipt built from those results alone.
+  // Neither a validator outage nor a rejected answer means the run was cut short, so neither justifies
+  // "interrupted": when every write of a finished run landed cleanly, the reply is a receipt built
+  // from those results alone and the unverified prose stays out (#998). A run that threw, or whose
+  // corrective retry stopped without a final answer, did not finish and says so.
+  const finished = !runFailed && !state.retryUnfinished;
+  const outage = state.validation.verdict === 'unavailable';
   const receipt =
-    state.validation.verdict === 'unavailable' && responseUnverified && !runFailed
+    (outage || state.validation.verdict === 'rejected') && responseUnverified && finished
       ? buildReceiptConfirmation(view, toolEvidence, writeOutcomes)
       : null;
-  const outage = state.validation.verdict === 'unavailable';
-  const interrupted = (runFailed || (responseUnverified && !outage)) && writeOutcomes.mayHaveMutated;
+  const interrupted = (!finished || (responseUnverified && !outage)) && writeOutcomes.mayHaveMutated;
   const evidence = receipt ?? writeOutcomes.finalNotice(view, interrupted);
   const silent = guardIsSilent(ctx, termination, writeOutcomes, evidence);
   const validationNotice =
