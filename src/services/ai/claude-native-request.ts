@@ -26,7 +26,7 @@ interface NativeToolUse {
   type: 'tool_use';
   id: string;
   name: string;
-  input: { [key: string]: z.core.JSONType };
+  input: z.infer<typeof jsonObject>;
 }
 interface NativeToolResult {
   type: 'tool_result';
@@ -51,7 +51,7 @@ interface NativeMessage {
 export interface NativeTool {
   name: string;
   description?: string;
-  input_schema: { [key: string]: z.core.JSONType };
+  input_schema: z.infer<typeof jsonObject>;
   cache_control?: CacheControl;
 }
 export interface NativeRequest {
@@ -160,7 +160,7 @@ function convertMessages(source: readonly OpenAI.ChatCompletionMessageParam[]) {
   return { messages, system };
 }
 
-/** Converts only the fields used by the bot; unsupported contracts fail before an HTTP request. */
+/** Converts current bot fields; known incompatible contracts fail before an HTTP request. */
 function initialRequest(params: OpenAI.ChatCompletionCreateParamsStreaming, activeTools: NativeTool[]): NativeRequest {
   if (params.response_format || params.tool_choice || params.functions || params.function_call)
     throw new TypeError('Unsupported Claude request contract');

@@ -86,6 +86,8 @@ describe('CalendarBotAgent.run()', () => {
         'freshInputTokens',
         'cacheWriteTokens',
         'cachedTokensMissingRounds',
+        'freshInputTokensMissingRounds',
+        'cacheWriteTokensMissingRounds',
         'usageMissingRounds',
         'usagePartialRounds',
         'termination',

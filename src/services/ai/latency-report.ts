@@ -24,6 +24,8 @@ export const AiLogRowSchema = z
     freshInputTokens: metricNumber.nullable().optional(),
     cacheWriteTokens: metricNumber.nullable().optional(),
     cachedTokensMissingRounds: metricNumber.optional(),
+    freshInputTokensMissingRounds: metricNumber.optional(),
+    cacheWriteTokensMissingRounds: metricNumber.optional(),
     usageMissingRounds: metricNumber.optional(),
     usagePartialRounds: metricNumber.optional(),
     termination: z.string().optional(),
@@ -117,13 +119,35 @@ function tallyLogRows(rows: readonly AiLogRow[]): LogTallies {
   return tallies;
 }
 
+type TokenCountKey =
+  | 'promptTokens'
+  | 'completionTokens'
+  | 'reportedTotalTokens'
+  | 'reasoningTokens'
+  | 'cachedTokens'
+  | 'freshInputTokens'
+  | 'cacheWriteTokens';
+type MissingRoundKey = 'cachedTokensMissingRounds' | 'freshInputTokensMissingRounds' | 'cacheWriteTokensMissingRounds';
+
 /** Sum only values actually reported; coverage makes partial aggregates explicit. */
-function tokenTotal(requestRows: readonly AiLogRow[], key: keyof AiLogRow) {
-  const values = requestRows.flatMap((row) => (typeof row[key] === 'number' ? [row[key] as number] : []));
+function tokenTotal(requestRows: readonly AiLogRow[], key: TokenCountKey | MissingRoundKey) {
+  const values = requestRows.flatMap((row) => {
+    const value = row[key];
+    return typeof value === 'number' ? [value] : [];
+  });
   return {
     sum: values.length ? values.reduce((sum, value) => sum + value, 0) : null,
     reportedRows: values.length,
     unknownRows: requestRows.length - values.length,
+  };
+}
+
+function coveredTokenTotal(requestRows: readonly AiLogRow[], key: TokenCountKey, missingKey: MissingRoundKey) {
+  const missing = tokenTotal(requestRows, missingKey);
+  return {
+    ...tokenTotal(requestRows, key),
+    missingRounds: missing.sum,
+    missingRoundsUnknownRows: missing.unknownRows,
   };
 }
 
@@ -133,11 +157,13 @@ function sumTokens(requestRows: readonly AiLogRow[]) {
     completion: tokenTotal(requestRows, 'completionTokens'),
     reportedTotal: tokenTotal(requestRows, 'reportedTotalTokens'),
     reasoning: tokenTotal(requestRows, 'reasoningTokens'),
-    cached: tokenTotal(requestRows, 'cachedTokens'),
-    freshInput: tokenTotal(requestRows, 'freshInputTokens'),
-    cacheWrite: tokenTotal(requestRows, 'cacheWriteTokens'),
+    cached: coveredTokenTotal(requestRows, 'cachedTokens', 'cachedTokensMissingRounds'),
+    freshInput: coveredTokenTotal(requestRows, 'freshInputTokens', 'freshInputTokensMissingRounds'),
+    cacheWrite: coveredTokenTotal(requestRows, 'cacheWriteTokens', 'cacheWriteTokensMissingRounds'),
   };
-  const counters = requestRows.reduce(
+  const emptyCounters = { missingRounds: 0, partialRounds: 0, fallbacks: 0, attempts: 0, calls: 0 };
+  // Avoid the passthrough log-row overload: these counters are always numbers.
+  const counters = requestRows.reduce<typeof emptyCounters>(
     (acc, row) => ({
       missingRounds: acc.missingRounds + (row.usageMissingRounds ?? 0),
       partialRounds: acc.partialRounds + (row.usagePartialRounds ?? 0),
@@ -145,7 +171,7 @@ function sumTokens(requestRows: readonly AiLogRow[]) {
       attempts: acc.attempts + (row.modelAttempts ?? 0),
       calls: acc.calls + (row.modelCalls ?? 0),
     }),
-    { missingRounds: 0, partialRounds: 0, fallbacks: 0, attempts: 0, calls: 0 },
+    emptyCounters,
   );
   return {
     ...counters,
@@ -156,7 +182,7 @@ function sumTokens(requestRows: readonly AiLogRow[]) {
     cached: totals.cached.sum,
     freshInput: totals.freshInput.sum,
     cacheWrite: totals.cacheWrite.sum,
-    cachedMissingRounds: tokenTotal(requestRows, 'cachedTokensMissingRounds').sum,
+    cachedMissingRounds: totals.cached.missingRounds,
     tokenCoverage: totals,
   };
 }

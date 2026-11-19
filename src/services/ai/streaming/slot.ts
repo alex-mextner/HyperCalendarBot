@@ -138,7 +138,7 @@ async function openCompletionStream(
   });
   try {
     startedAt = performance.now();
-    stream = await withClaudeCredentials(
+    stream = await withClaudeCredentials<AsyncIterable<OpenAI.ChatCompletionChunk>>(
       client,
       (candidate, attemptSignal) =>
         native

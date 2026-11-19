@@ -1,4 +1,3 @@
-import type { AiTokenUsage } from '../usage-recorder.ts';
 // src/services/ai/streaming/failure.ts
 // What a failed or skipped provider attempt turns into: the failure record carried by
 // `AllProvidersFailedError`, the usage-ledger row, the circuit settlement and the log/alert line.
@@ -10,7 +9,7 @@ import { getClaudeCredentialAvailability } from '../claude-credential-pool.ts';
 import { type Admission, type CircuitContext, settleFailure, settleInconclusive } from '../provider-circuit.ts';
 import type { ProviderId } from '../provider-ids.ts';
 import { classifyProviderError } from '../usage-classification.ts';
-import { type AttemptScope, failedAttempt } from '../usage-recorder.ts';
+import { type AiTokenUsage, type AttemptScope, failedAttempt } from '../usage-recorder.ts';
 import { isProviderDown, isTransientProviderError } from './error-classification.ts';
 import { EmptyProviderResponseError } from './errors.ts';
 import { aiLogger } from './logger.ts';

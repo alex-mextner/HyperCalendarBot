@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { migrations } from '../../../src/database/migrations.ts';
 import { AiUsageRepository } from '../../../src/database/repositories/ai-usage.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -17,6 +18,28 @@ import type { AiTokenUsage } from '../../../src/services/ai/usage-recorder.ts';
 import { answeredAttempt } from '../../../src/services/ai/usage-recorder.ts';
 import { summarizeAiUsage } from '../../../src/services/ai/usage-report.ts';
 import { createAgentRunFixture, fakeMetrics, makeStreamImpl } from './agent-run-helpers.ts';
+
+// Bun's Request.clone() exposes the standard Fetch request shape, without Bun-only helpers.
+type WireRequest = ReturnType<Request['clone']>;
+function captureRequest(input: string | URL | Request, init?: RequestInit): WireRequest {
+  if (typeof input !== 'string' && !(input instanceof URL)) throw new Error('Expected SDK URL and RequestInit');
+  return new Request(String(input), init);
+}
+const wireBodySchema = z.looseObject({
+  stream: z.literal(true),
+  model: z.string(),
+  max_tokens: z.number(),
+  messages: z.array(z.looseObject({ role: z.string(), content: z.array(z.unknown()) })),
+  system: z.array(z.looseObject({ text: z.string(), cache_control: z.unknown().optional() })).optional(),
+  tools: z.array(z.looseObject({ cache_control: z.unknown().optional() })).optional(),
+  cache_control: z.unknown().optional(),
+  thinking: z.unknown().optional(),
+  tool_choice: z.unknown().optional(),
+  temperature: z.number().optional(),
+});
+async function requestBody(request: WireRequest) {
+  return wireBodySchema.parse(await request.json());
+}
 
 function sse(events: readonly { type: string; [key: string]: unknown }[]): Response {
   return new Response(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), {
@@ -47,13 +70,13 @@ function nativeAnswer(): Response {
 }
 
 test('Claude native mode uses cacheable Messages API and preserves native usage components', async () => {
-  const requests: Request[] = [];
+  const requests: WireRequest[] = [];
   const client = createClaudeClient(
     ['synthetic-primary'],
     {
       baseURL: 'https://api.anthropic.com/v1',
       fetch: async (input, init) => {
-        const request = new Request(input, init);
+        const request = captureRequest(input, init);
         requests.push(request.clone());
         if (new URL(request.url).pathname.endsWith('/messages')) return nativeAnswer();
         return new Response(
@@ -91,10 +114,12 @@ test('Claude native mode uses cacheable Messages API and preserves native usage 
   expect(new URL(requests[0]!.url).pathname).toBe('/v1/messages');
   expect(requests[0]!.headers.get('x-api-key')).toBe('synthetic-primary');
   expect(requests[0]!.headers.get('anthropic-version')).toBe('2023-06-01');
-  const body = await requests[0]!.json();
+  const body = await requestBody(requests[0]!);
+  expect(body.stream).toBe(true);
+  expect(body.system?.[0]).toMatchObject({ type: 'text' });
   expect(body.cache_control).toBeUndefined();
-  expect(body.tools[0].cache_control).toEqual({ type: 'ephemeral' });
-  expect(body.system[0].cache_control).toEqual({ type: 'ephemeral' });
+  expect(body.tools?.[0]?.cache_control).toEqual({ type: 'ephemeral' });
+  expect(body.system?.[0]?.cache_control).toEqual({ type: 'ephemeral' });
   expect(result.text).toBe('ok');
   expect(result.finishReason).toBe('stop');
   expect(result.metrics?.usage).toMatchObject({
@@ -309,7 +334,7 @@ test('a credential timeout records the failed key before the backup succeeds', a
     {
       baseURL: 'https://api.anthropic.com/v1',
       fetch: async (input, init) => {
-        const request = new Request(input, init);
+        const request = captureRequest(input, init);
         seen.push(request.headers.get('x-api-key'));
         if (seen.length === 1)
           return new Promise<Response>((_resolve, reject) =>
@@ -387,13 +412,13 @@ test('usage reports separate native credential totals from historical unknown at
 });
 
 test('native tool rounds echo opaque blocks exactly and append newly discovered schemas', async () => {
-  const requests: Request[] = [];
+  const requests: WireRequest[] = [];
   const client = createClaudeClient(
     ['synthetic-primary'],
     {
       baseURL: 'https://api.anthropic.com/v1',
       fetch: async (input, init) => {
-        requests.push(new Request(input, init).clone());
+        requests.push(captureRequest(input, init).clone());
         if (requests.length > 1) return nativeAnswer();
         return sse([
           {
@@ -470,22 +495,19 @@ test('native tool rounds echo opaque blocks exactly and append newly discovered 
     {},
     () => undefined,
   );
-  const before = await requests[0]!.json();
-  const after = await requests[1]!.json();
+  const before = await requestBody(requests[0]!);
+  const after = await requestBody(requests[1]!);
   expect(after.system).toEqual(before.system);
   expect(after.tools).toEqual(before.tools);
   expect(after.messages.slice(0, before.messages.length)).toEqual(before.messages);
-  expect(after.messages[1].content).toEqual([
+  expect(after.messages[1]?.content).toEqual([
     { type: 'thinking', thinking: '', signature: 'opaque-signature' },
     { type: 'tool_use', id: 'call-one', name: 'read_one', input: { day: 'synthetic' } },
     { type: 'redacted_thinking', data: 'opaque-redacted' },
     { type: 'text', text: 'Checking. Continuing.' },
     { type: 'tool_use', id: 'call-two', name: 'read_two', input: {} },
   ]);
-  expect(after.messages[2].content.map((block: { tool_use_id: string }) => block.tool_use_id)).toEqual([
-    'call-one',
-    'call-two',
-  ]);
+  expect(after.messages[2]?.content).toMatchObject([{ tool_use_id: 'call-one' }, { tool_use_id: 'call-two' }]);
   expect(after.messages[3]).toMatchObject({
     role: 'system',
     content: [{ type: 'tool_addition', tool: { type: 'tool_definition', definition: { name: 'discovered_later' } } }],

@@ -22,6 +22,8 @@ export interface AgentRequestMetricSnapshot {
   freshInputTokens: number | null;
   cacheWriteTokens: number | null;
   cachedTokensMissingRounds: number;
+  freshInputTokensMissingRounds: number;
+  cacheWriteTokensMissingRounds: number;
   usageMissingRounds: number;
   usagePartialRounds: number;
   termination: AgentTermination;
@@ -134,6 +136,8 @@ export class AgentRequestMetrics {
       freshInputTokens: this.freshInputReports ? this.freshInputTokens : null,
       cacheWriteTokens: this.cacheWriteReports ? this.cacheWriteTokens : null,
       cachedTokensMissingRounds: this.modelCalls - this.cachedTokenReports,
+      freshInputTokensMissingRounds: this.modelCalls - this.freshInputReports,
+      cacheWriteTokensMissingRounds: this.modelCalls - this.cacheWriteReports,
       usageMissingRounds: this.usageMissingRounds,
       usagePartialRounds: this.usagePartialRounds,
       termination,

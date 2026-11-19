@@ -16,6 +16,7 @@ const STREAM_ERROR_CATEGORIES: ReadonlyMap<string, number> = new Map([
   ['authentication_error', 401],
   ['permission_error', 403],
   ['not_found_error', 404],
+  // Semantic bad_request; this repository reserves status 413 for rate limiting. HTTP status stays null.
   ['request_too_large', 400],
   ['rate_limit_error', 429],
   ['api_error', 500],

@@ -195,3 +195,24 @@ test('token summaries distinguish unknown cache counts, known zero and partial c
     tokenCoverage: { cached: { reportedRows: 1, unknownRows: 0 } },
   });
 });
+
+test('mixed historical logs retain unknown coverage of the missing-round counter', () => {
+  const summary = summarizeAiLogs([
+    { msg: 'AI request metric', requestId: 'legacy', cachedTokens: 0 },
+    {
+      msg: 'AI request metric',
+      requestId: 'native',
+      cachedTokens: 0,
+      cachedTokensMissingRounds: 0,
+      freshInputTokens: 7,
+      freshInputTokensMissingRounds: 0,
+      cacheWriteTokens: 0,
+      cacheWriteTokensMissingRounds: 0,
+    },
+  ]);
+  expect(summary.tokens.tokenCoverage).toMatchObject({
+    cached: { sum: 0, reportedRows: 2, unknownRows: 0, missingRounds: 0, missingRoundsUnknownRows: 1 },
+    freshInput: { sum: 7, reportedRows: 1, unknownRows: 1, missingRounds: 0, missingRoundsUnknownRows: 1 },
+    cacheWrite: { sum: 0, reportedRows: 1, unknownRows: 1, missingRounds: 0, missingRoundsUnknownRows: 1 },
+  });
+});
