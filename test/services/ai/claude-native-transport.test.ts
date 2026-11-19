@@ -25,17 +25,18 @@ function captureRequest(input: string | URL | Request, init?: RequestInit): Wire
   if (typeof input !== 'string' && !(input instanceof URL)) throw new Error('Expected SDK URL and RequestInit');
   return new Request(String(input), init);
 }
+const cacheControlSchema = z.looseObject({
+  type: z.literal('ephemeral'),
+  ttl: z.enum(['5m', '1h']).optional(),
+});
 const wireBodySchema = z.looseObject({
   stream: z.literal(true),
   model: z.string(),
   max_tokens: z.number(),
-  messages: z.array(z.looseObject({ role: z.string(), content: z.array(z.unknown()) })),
-  system: z.array(z.looseObject({ text: z.string(), cache_control: z.unknown().optional() })).optional(),
-  tools: z.array(z.looseObject({ cache_control: z.unknown().optional() })).optional(),
-  cache_control: z.unknown().optional(),
-  thinking: z.unknown().optional(),
-  tool_choice: z.unknown().optional(),
-  temperature: z.number().optional(),
+  messages: z.array(z.looseObject({ role: z.enum(['user', 'assistant', 'system']), content: z.array(z.json()) })),
+  system: z.array(z.looseObject({ text: z.string(), cache_control: cacheControlSchema.optional() })).optional(),
+  tools: z.array(z.looseObject({ cache_control: cacheControlSchema.optional() })).optional(),
+  cache_control: cacheControlSchema.optional(),
 });
 async function requestBody(request: WireRequest) {
   return wireBodySchema.parse(await request.json());
