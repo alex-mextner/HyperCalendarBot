@@ -377,6 +377,8 @@ describe('CalendarBotAgent.run()', () => {
     //   - Second validator call: APPROVE (a second REJECT must not be persisted)
     let round = 0;
     let validationCalls = 0;
+    let rejectedAssistant: OpenAI.ChatCompletionMessageParam | undefined;
+    let retriedAssistant: OpenAI.ChatCompletionMessageParam | undefined;
     const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}) => {
       if (isValidatorCall(opts)) {
         const verdict = validationCalls++ === 0 ? 'REJECT: no tool used' : 'APPROVE';
@@ -390,10 +392,12 @@ describe('CalendarBotAgent.run()', () => {
         };
       }
       round++;
+      if (round === 2) retriedAssistant = opts.messages.find((message) => message.role === 'assistant');
       const text = round === 1 ? 'hallucinated answer' : 'corrected answer';
       // Stream like the real provider does, so the writer shows the approved retry text.
       cbs.onTextDelta?.(text);
       const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      if (round === 1) rejectedAssistant = msg;
       return {
         text,
         toolCalls: [],
@@ -412,6 +416,8 @@ describe('CalendarBotAgent.run()', () => {
     const assistantRows = history.filter((h) => h.role === 'assistant');
     const hasHallucination = assistantRows.some((h) => h.content.includes('hallucinated answer'));
     expect(hasHallucination).toBe(false);
+    // Native replay is private metadata on this exact assistant object.
+    expect(retriedAssistant).toBe(rejectedAssistant);
     const hasCorrected = assistantRows.some((h) => h.content.includes('corrected answer'));
     expect(hasCorrected).toBe(true);
   });

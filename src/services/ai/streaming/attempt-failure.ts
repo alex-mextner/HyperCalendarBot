@@ -107,6 +107,7 @@ export function handleAttemptFailure(state: RoundState, attempt: AdmittedAttempt
         callerAborted,
         attempt.attemptAt,
         attempt.attemptStartedAt,
+        attempt.nativeUsage ?? null,
       ),
     );
   // An account-level failure is owned by the durable circuit, which tells the

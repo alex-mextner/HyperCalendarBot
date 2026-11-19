@@ -1,3 +1,4 @@
+import type { AiTokenUsage } from '../usage-recorder.ts';
 // src/services/ai/streaming/failure.ts
 // What a failed or skipped provider attempt turns into: the failure record carried by
 // `AllProvidersFailedError`, the usage-ledger row, the circuit settlement and the log/alert line.
@@ -51,6 +52,7 @@ export function failureAttempt(
   callerAborted: boolean,
   attemptAt: number,
   attemptStartedAt: number,
+  observedNativeUsage: AiTokenUsage | null = null,
 ): AiUsageEvent {
   const durationMs = Math.round(Math.max(0, performance.now() - attemptStartedAt));
   if (error instanceof EmptyProviderResponseError) {
@@ -72,7 +74,7 @@ export function failureAttempt(
     attemptAt,
     durationMs,
     classifyProviderError(error, callerAborted),
-    null,
+    slot.provider === 'claude' ? observedNativeUsage : null,
   );
 }
 

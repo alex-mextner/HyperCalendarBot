@@ -95,6 +95,7 @@ async function validateWithRetry(env: TurnEnv, state: TurnState, evidence: Prose
   if (validation.verdict === 'approved') return false;
 
   state.responseUnverified = true;
+  const rejectedAssistant = state.pendingAssistantTurn;
   state.pendingAssistantTurn = null;
   if (validation.verdict === 'unavailable' && env.ledger.writeOutcomes.mayHaveMutated) {
     aiLogger.warn(
@@ -112,7 +113,12 @@ async function validateWithRetry(env: TurnEnv, state: TurnState, evidence: Prose
       ? 'Response validation REJECTED — retrying with tools'
       : 'Response validator unavailable — retrying with tools',
   );
-  const retryOutcome = await runRetryAfterRejection(env, state.currentMessages, evidence.response);
+  const retryOutcome = await runRetryAfterRejection(
+    env,
+    state.currentMessages,
+    evidence.response,
+    rejectedAssistant ?? undefined,
+  );
 
   if (retryOutcome.hitStopLoop) state.termination = retryOutcome.waiting ? 'waiting' : 'stop';
 

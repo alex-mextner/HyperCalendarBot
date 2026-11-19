@@ -82,6 +82,13 @@ export interface ModelUsage extends UsageStats {
   model: string;
 }
 
+/** Native Claude attempts grouped by selected credential; null explicitly means unknown attribution. */
+export interface ClaudeAccountUsage extends ModelUsage {
+  credentialId: string | null;
+  freshInput: TokenTotals;
+  cacheWrite: TokenTotals;
+}
+
 /** One routing role on one provider; `role` is `legacy` for attempts that no role served. */
 export interface RoleUsage extends UsageStats {
   role: string;
@@ -110,13 +117,21 @@ export interface UsageSummary {
   window: UsageWindow;
   totalAttempts: number;
   models: ModelUsage[];
+  /** Present once any native attempt is observed; legacy rows remain in an unknown-credential group. */
+  claudeAccounts?: ClaudeAccountUsage[];
   /** Empty unless some attempt in the window was served by a role: without roles the report is the legacy one. */
   roles: RoleUsage[];
   /** Every known provider, in chain-config order, then any other id found in the rows. */
   providers: ProviderUsage[];
 }
 
-type TokenField = 'promptTokens' | 'completionTokens' | 'reasoningTokens' | 'cachedTokens';
+type TokenField =
+  | 'promptTokens'
+  | 'completionTokens'
+  | 'reasoningTokens'
+  | 'cachedTokens'
+  | 'freshInputTokens'
+  | 'cacheWriteTokens';
 
 interface Counter {
   sum: number;
@@ -152,6 +167,8 @@ function newAccumulator(): Accumulator {
       completionTokens: counter(),
       reasoningTokens: counter(),
       cachedTokens: counter(),
+      freshInputTokens: counter(),
+      cacheWriteTokens: counter(),
     },
     cost: counter(),
     firstOkAt: null,
@@ -160,10 +177,17 @@ function newAccumulator(): Accumulator {
   };
 }
 
-const TOKEN_FIELDS: TokenField[] = ['promptTokens', 'completionTokens', 'reasoningTokens', 'cachedTokens'];
+const TOKEN_FIELDS: TokenField[] = [
+  'promptTokens',
+  'completionTokens',
+  'reasoningTokens',
+  'cachedTokens',
+  'freshInputTokens',
+  'cacheWriteTokens',
+];
 
-function tally(counter: Counter, value: number | null, answered: boolean): void {
-  if (value !== null) {
+function tally(counter: Counter, value: number | null | undefined, answered: boolean): void {
+  if (value != null) {
     counter.sum += value;
     counter.reported++;
   } else if (answered) {
@@ -281,6 +305,8 @@ const ROLE_ORDER: readonly string[] = [...MODEL_ROLES, LEGACY_ROLE];
 export function summarizeAiUsage(events: Iterable<AiUsageEvent>, window: UsageWindow): UsageSummary {
   const modelGroups = new Map<string, { provider: string; model: string; acc: Accumulator }>();
   const roleGroups = new Map<string, { role: string; provider: string; acc: Accumulator }>();
+  const accountGroups = new Map<string, { model: string; credentialId: string | null; acc: Accumulator }>();
+  let hasNativeAttribution = false;
   let totalAttempts = 0;
   for (const event of events) {
     totalAttempts++;
@@ -291,6 +317,17 @@ export function summarizeAiUsage(events: Iterable<AiUsageEvent>, window: UsageWi
       modelGroups.set(modelKey, modelGroup);
     }
     add(modelGroup.acc, event);
+    if (event.provider === 'claude') {
+      const credentialId = event.credentialId ?? null;
+      hasNativeAttribution ||= credentialId !== null;
+      const accountKey = `${event.model}\u0000${credentialId ?? ''}`;
+      let accountGroup = accountGroups.get(accountKey);
+      if (!accountGroup) {
+        accountGroup = { model: event.model, credentialId, acc: newAccumulator() };
+        accountGroups.set(accountKey, accountGroup);
+      }
+      add(accountGroup.acc, event);
+    }
 
     const role = event.role ?? LEGACY_ROLE;
     const roleKey = `${role}\u0000${event.provider}`;
@@ -327,6 +364,22 @@ export function summarizeAiUsage(events: Iterable<AiUsageEvent>, window: UsageWi
     window,
     totalAttempts,
     models,
+    ...(hasNativeAttribution
+      ? {
+          claudeAccounts: [...accountGroups.values()]
+            .map(({ model, credentialId, acc }) => ({
+              provider: 'claude',
+              model,
+              credentialId,
+              ...statsOf(acc),
+              freshInput: totalsOf(acc.tokenSums.freshInputTokens),
+              cacheWrite: totalsOf(acc.tokenSums.cacheWriteTokens),
+            }))
+            .sort(
+              (a, b) => a.model.localeCompare(b.model) || (a.credentialId ?? '').localeCompare(b.credentialId ?? ''),
+            ),
+        }
+      : {}),
     roles,
     providers: providerIds.map((provider) => providerUsageOf(provider, models)),
   };

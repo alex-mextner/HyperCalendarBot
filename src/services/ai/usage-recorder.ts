@@ -34,6 +34,10 @@ export interface AiTokenUsage {
   completionTokens: number | null;
   reasoningTokens: number | null;
   cachedTokens: number | null;
+  /** Native Claude decomposition and safe selected-credential fingerprint; absent on historical/compatible usage. */
+  freshInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  credentialId?: string | null;
   /** Cost in USD the provider reported for the request (OpenRouter's `usage.cost`); absent when it did not. */
   costUsd?: number | null;
 }
@@ -128,6 +132,13 @@ function attempt(
     completionTokens: tokens.completionTokens,
     reasoningTokens: tokens.reasoningTokens,
     cachedTokens: tokens.cachedTokens,
+    ...(tokens.credentialId
+      ? {
+          freshInputTokens: tokens.freshInputTokens ?? null,
+          cacheWriteTokens: tokens.cacheWriteTokens ?? null,
+          credentialId: tokens.credentialId,
+        }
+      : {}),
     requestId: scope.requestId ?? null,
     role: scope.role,
     preset: scope.preset,

@@ -62,6 +62,17 @@ try {
     );
     process.exit(1);
   }
+  const nativeColumns = db
+    .query<{ n: number }, []>(
+      "SELECT count(*) AS n FROM pragma_table_info('ai_usage_events') WHERE name IN ('fresh_input_tokens', 'cache_write_tokens', 'credential_id')",
+    )
+    .get();
+  if (nativeColumns?.n !== 3) {
+    console.error(
+      'ai_usage_events is missing native accounting columns: run migration 071_ai_usage_native_cache first',
+    );
+    process.exit(1);
+  }
   const untilMs = Date.now();
   const window = { sinceMs: untilMs - days * DAY_MS, untilMs };
   const summary = summarizeAiUsage(new AiUsageRepository(db).iterateSince(window.sinceMs), window);

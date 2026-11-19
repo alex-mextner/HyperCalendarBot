@@ -40,6 +40,7 @@ import { createTurnState, type RunFailure, type TurnEnv, type TurnState } from '
 import { createTurnWriter, senderForTurn } from './agent/turn-writer.ts';
 import { ChatRunGate, type ChatRunSlot, type ChatTurnReservation } from './chat-run-gate.ts';
 import { currentChatTurn } from './chat-turn-context.ts';
+import { cacheableSystemMessage } from './claude-cache-prefix.ts';
 import { resolveTurnDayReferences } from './day-reference-guard.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
@@ -253,7 +254,8 @@ export class CalendarBotAgent {
     const activePrompt = assembleSystemPrompt(systemParts, env.exposure?.prompt);
     dbg?.logSystemPrompt(activePrompt);
     dbg?.logHistory(historyMessages);
-    state.currentMessages = [{ role: 'system', content: activePrompt }, ...historyMessages];
+    const cachePrefix = assembleSystemPrompt({ ...systemParts, dynamic: '' }, env.exposure?.prompt);
+    state.currentMessages = [cacheableSystemMessage(activePrompt, cachePrefix), ...historyMessages];
   }
 
   private async runTurn(ctx: AgentContext, dbg: AiDebugRunContext | null, slot: ChatRunSlot): Promise<AgentRunResult> {

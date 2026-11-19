@@ -14,7 +14,14 @@ import { withinProviderDeadline } from '../provider-deadline.ts';
 import { clearBlock, isBlocked } from '../provider-eligibility.ts';
 import { roleForPurpose, rolesApplyTo } from '../role-routing.ts';
 import { classifyProviderError } from '../usage-classification.ts';
-import { type AttemptScope, answeredAttempt, failedAttempt, recordAiUsage, skippedAttempt } from '../usage-recorder.ts';
+import {
+  type AiTokenUsage,
+  type AttemptScope,
+  answeredAttempt,
+  failedAttempt,
+  recordAiUsage,
+  skippedAttempt,
+} from '../usage-recorder.ts';
 import { benchChainOf, buildFastChain, buildRoleChain, buildSmartChain, withoutModelsOf } from './chains.ts';
 import { AllProvidersFailedError, unexposedToolNamesOf } from './errors.ts';
 import { providerFailureMetrics, skippedByCircuit } from './failure.ts';
@@ -57,6 +64,7 @@ export interface AdmittedAttempt {
   attemptAt: number;
   attemptStartedAt: number;
   pendingFailure?: FailedHttpAttempt;
+  nativeUsage?: AiTokenUsage | null;
 }
 
 export function createRoundState(options: StreamRoundOptions, callbacks: StreamCallbacks): RoundState {
@@ -195,7 +203,7 @@ export function recordPendingHttpFailure(state: RoundState, attempt: AdmittedAtt
       failure.startedAt,
       Math.round(failure.durationMs),
       classifyProviderError(failure.error, false),
-      null,
+      failure.usage ?? null,
     ),
   );
   return true;
@@ -212,11 +220,14 @@ function runUnderDeadline(state: RoundState, attempt: AdmittedAttempt, timeoutMs
         slot,
         { ...options, signal, providerDeadlineAt },
         {
+          onNativeUsage: (usage) => {
+            attempt.nativeUsage = usage;
+          },
           onTextDelta: (text) => {
             if (!signal.aborted) wrappedCallbacks.onTextDelta?.(text);
           },
           onCredentialRetry: (failure) => {
-            if (!signal.aborted) attempt.pendingFailure = failure;
+            if (!signal.aborted) attempt.pendingFailure = { ...failure, usage: attempt.nativeUsage ?? null };
           },
           onToolCallStart: (name) => {
             if (!signal.aborted) wrappedCallbacks.onToolCallStart?.(name);
@@ -225,6 +236,7 @@ function runUnderDeadline(state: RoundState, attempt: AdmittedAttempt, timeoutMs
         () => {
           signal.throwIfAborted();
           recordPendingHttpFailure(state, attempt);
+          attempt.nativeUsage = null;
           state.actualAttempts++;
           attempt.attemptAt = Date.now();
           attempt.attemptStartedAt = performance.now();

@@ -163,3 +163,35 @@ test('rows without a request id or a usable duration contribute nothing they sho
   expect(summary.byProvider).toEqual({});
   expect(summary.byTier).toEqual({});
 });
+
+test('token summaries distinguish unknown cache counts, known zero and partial coverage', () => {
+  const unknown = { msg: 'AI request metric', requestId: 'unknown', cachedTokens: null };
+  expect(summarizeAiLogs([unknown]).tokens).toMatchObject({
+    cached: null,
+    tokenCoverage: { cached: { reportedRows: 0, unknownRows: 1 } },
+  });
+  expect(
+    summarizeAiLogs([unknown, { msg: 'AI request metric', requestId: 'zero', cachedTokens: 0 }]).tokens,
+  ).toMatchObject({
+    cached: 0,
+    tokenCoverage: { cached: { reportedRows: 1, unknownRows: 1 } },
+  });
+  expect(
+    summarizeAiLogs([
+      {
+        msg: 'AI request metric',
+        requestId: 'native',
+        cachedTokens: 20,
+        freshInputTokens: 7,
+        cacheWriteTokens: 10,
+        cachedTokensMissingRounds: 1,
+      },
+    ]).tokens,
+  ).toMatchObject({
+    cached: 20,
+    freshInput: 7,
+    cacheWrite: 10,
+    cachedMissingRounds: 1,
+    tokenCoverage: { cached: { reportedRows: 1, unknownRows: 0 } },
+  });
+});

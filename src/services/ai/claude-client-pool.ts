@@ -1,3 +1,4 @@
+// Select healthy Claude credentials while keeping per-attempt accounting and transport identity.
 import OpenAI, { type ClientOptions } from 'openai';
 import { type ClaudeCredentialRequestOptions, createClaudeCredentialPool } from './claude-credential-pool.ts';
 import { MODERATION_REJECTION } from './usage-classification.ts';
@@ -25,6 +26,11 @@ const registered = new WeakMap<
 
 /** Clients whose only usable credential cannot be sent as an Authorization header. */
 const headerInvalid = new WeakSet<OpenAI>();
+const nativeClients = new WeakSet<OpenAI>();
+
+export function usesNativeClaude(client: OpenAI): boolean {
+  return nativeClients.has(client);
+}
 
 /** Both credentials scope durable circuits; adding/rotating a backup must invalidate an old exhausted circuit. */
 export function claudeCredentialScope(primary?: string, secondary?: string): string | undefined {
@@ -53,6 +59,7 @@ function isHeaderSafe(token: string): boolean {
 export function createClaudeClient(
   tokens: readonly (string | undefined)[],
   options: Omit<ClientOptions, 'apiKey'>,
+  transport: 'native' | 'openai' = 'openai',
 ): OpenAI {
   const distinct = [...new Set(tokens.map((token) => token?.trim()).filter((token): token is string => !!token))];
   const firstDistinct = distinct[0];
@@ -61,7 +68,13 @@ export function createClaudeClient(
   const clientFor = (token: string): OpenAI => {
     let client = clients.get(token);
     if (!client) {
-      client = new OpenAI({ ...options, apiKey: token, maxRetries: 0 });
+      client = new OpenAI({
+        ...options,
+        apiKey: token,
+        maxRetries: 0,
+        ...(transport === 'native' ? { logLevel: 'off' } : {}),
+      });
+      if (transport === 'native') nativeClients.add(client);
       clients.set(token, client);
     }
     return client;

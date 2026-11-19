@@ -5,6 +5,7 @@
 
 import type OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
+import { type NativeReplay, nativeChunkReplay, rememberNativeConsumed } from '../claude-native-content.ts';
 import { waitForAbort } from '../provider-deadline.ts';
 import { estimateTokens } from '../token-estimate.ts';
 import { aiLogger } from './logger.ts';
@@ -76,6 +77,7 @@ const MIN_CHARS_PER_TOKEN = 1.2;
 
 /** What `consumeStream` has read so far; mutated chunk by chunk. */
 interface ReadState {
+  nativeReplay?: NativeReplay;
   text: string;
   finishReason: string;
   chunkCount: number;
@@ -146,6 +148,8 @@ function readDelta(
 }
 
 function readChunk(state: ReadState, chunk: OpenAI.ChatCompletionChunk, cbs: StreamCallbacks, startedAt: number): void {
+  const replay = nativeChunkReplay(chunk);
+  if (replay) state.nativeReplay = replay;
   state.chunkCount++;
   state.choiceCount += chunk.choices.length;
   // OpenAI-compatible providers emit the final usage in a choices=[] chunk.
@@ -185,7 +189,7 @@ function requestIteratorCleanup(iterator: AsyncIterator<OpenAI.ChatCompletionChu
 }
 
 function consumedFrom(state: ReadState): ConsumedStream {
-  return {
+  const consumed: ConsumedStream = {
     text: state.text,
     finishReason: state.finishReason,
     refusalSeen: state.refusalSeen,
@@ -197,6 +201,8 @@ function consumedFrom(state: ReadState): ConsumedStream {
     usage: state.usage,
     toolCalls: [...state.toolCalls.values()].map((tc) => ({ id: tc.id, name: tc.name, arguments: tc.args })),
   };
+  rememberNativeConsumed(consumed, state.nativeReplay);
+  return consumed;
 }
 
 /**
