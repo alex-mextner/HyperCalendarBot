@@ -52,6 +52,7 @@ export async function runRetryAfterRejection(
   env: ValidationRetryEnv,
   messages: MessageParam[],
   previousText: string,
+  previousAssistant?: MessageParam,
 ): Promise<ValidationRetryOutcome> {
   const { ctx, writer, dbg } = env;
   // Discard the rejected draft text so commitIntermediate() never pushes it
@@ -61,7 +62,7 @@ export async function runRetryAfterRejection(
 
   let currentMessages: MessageParam[] = [
     ...messages,
-    { role: 'assistant', content: previousText },
+    previousAssistant ?? { role: 'assistant', content: previousText },
     { role: 'user', content: RETRY_NUDGE },
   ];
 

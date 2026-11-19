@@ -21,6 +21,11 @@ export const AiLogRowSchema = z
     reportedTotalTokens: metricNumber.optional(),
     reasoningTokens: metricNumber.nullable().optional(),
     cachedTokens: metricNumber.nullable().optional(),
+    freshInputTokens: metricNumber.nullable().optional(),
+    cacheWriteTokens: metricNumber.nullable().optional(),
+    cachedTokensMissingRounds: metricNumber.optional(),
+    freshInputTokensMissingRounds: metricNumber.optional(),
+    cacheWriteTokensMissingRounds: metricNumber.optional(),
     usageMissingRounds: metricNumber.optional(),
     usagePartialRounds: metricNumber.optional(),
     termination: z.string().optional(),
@@ -114,46 +119,72 @@ function tallyLogRows(rows: readonly AiLogRow[]): LogTallies {
   return tallies;
 }
 
-interface TokenSummary {
-  prompt: number;
-  completion: number;
-  reportedTotal: number;
-  reasoning: number;
-  cached: number;
-  missingRounds: number;
-  partialRounds: number;
-  fallbacks: number;
-  attempts: number;
-  calls: number;
+type TokenCountKey =
+  | 'promptTokens'
+  | 'completionTokens'
+  | 'reportedTotalTokens'
+  | 'reasoningTokens'
+  | 'cachedTokens'
+  | 'freshInputTokens'
+  | 'cacheWriteTokens';
+type MissingRoundKey = 'cachedTokensMissingRounds' | 'freshInputTokensMissingRounds' | 'cacheWriteTokensMissingRounds';
+
+/** Sum only values actually reported; coverage makes partial aggregates explicit. */
+function tokenTotal(requestRows: readonly AiLogRow[], key: TokenCountKey | MissingRoundKey) {
+  const values = requestRows.flatMap((row) => {
+    const value = row[key];
+    return typeof value === 'number' ? [value] : [];
+  });
+  return {
+    sum: values.length ? values.reduce((sum, value) => sum + value, 0) : null,
+    reportedRows: values.length,
+    unknownRows: requestRows.length - values.length,
+  };
 }
 
-function sumTokens(requestRows: readonly AiLogRow[]): TokenSummary {
-  return requestRows.reduce<TokenSummary>(
+function coveredTokenTotal(requestRows: readonly AiLogRow[], key: TokenCountKey, missingKey: MissingRoundKey) {
+  const missing = tokenTotal(requestRows, missingKey);
+  return {
+    ...tokenTotal(requestRows, key),
+    missingRounds: missing.sum,
+    missingRoundsUnknownRows: missing.unknownRows,
+  };
+}
+
+function sumTokens(requestRows: readonly AiLogRow[]) {
+  const totals = {
+    prompt: tokenTotal(requestRows, 'promptTokens'),
+    completion: tokenTotal(requestRows, 'completionTokens'),
+    reportedTotal: tokenTotal(requestRows, 'reportedTotalTokens'),
+    reasoning: tokenTotal(requestRows, 'reasoningTokens'),
+    cached: coveredTokenTotal(requestRows, 'cachedTokens', 'cachedTokensMissingRounds'),
+    freshInput: coveredTokenTotal(requestRows, 'freshInputTokens', 'freshInputTokensMissingRounds'),
+    cacheWrite: coveredTokenTotal(requestRows, 'cacheWriteTokens', 'cacheWriteTokensMissingRounds'),
+  };
+  const emptyCounters = { missingRounds: 0, partialRounds: 0, fallbacks: 0, attempts: 0, calls: 0 };
+  // Avoid the passthrough log-row overload: these counters are always numbers.
+  const counters = requestRows.reduce<typeof emptyCounters>(
     (acc, row) => ({
-      prompt: acc.prompt + (row.promptTokens ?? 0),
-      completion: acc.completion + (row.completionTokens ?? 0),
-      reportedTotal: acc.reportedTotal + (row.reportedTotalTokens ?? 0),
-      reasoning: acc.reasoning + (row.reasoningTokens ?? 0),
-      cached: acc.cached + (row.cachedTokens ?? 0),
       missingRounds: acc.missingRounds + (row.usageMissingRounds ?? 0),
       partialRounds: acc.partialRounds + (row.usagePartialRounds ?? 0),
       fallbacks: acc.fallbacks + (row.providerFallbacks ?? 0),
       attempts: acc.attempts + (row.modelAttempts ?? 0),
       calls: acc.calls + (row.modelCalls ?? 0),
     }),
-    {
-      prompt: 0,
-      completion: 0,
-      reportedTotal: 0,
-      reasoning: 0,
-      cached: 0,
-      missingRounds: 0,
-      partialRounds: 0,
-      fallbacks: 0,
-      attempts: 0,
-      calls: 0,
-    },
+    emptyCounters,
   );
+  return {
+    ...counters,
+    prompt: totals.prompt.sum,
+    completion: totals.completion.sum,
+    reportedTotal: totals.reportedTotal.sum,
+    reasoning: totals.reasoning.sum,
+    cached: totals.cached.sum,
+    freshInput: totals.freshInput.sum,
+    cacheWrite: totals.cacheWrite.sum,
+    cachedMissingRounds: totals.cached.missingRounds,
+    tokenCoverage: totals,
+  };
 }
 
 function providerBreakdown(tallies: LogTallies) {

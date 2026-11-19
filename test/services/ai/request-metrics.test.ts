@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { summarizeAiLogs } from '../../../src/services/ai/latency-report.ts';
 import { AgentRequestMetrics } from '../../../src/services/ai/request-metrics.ts';
 import type { StreamRoundMetrics } from '../../../src/services/ai/streaming.ts';
 
@@ -48,5 +49,35 @@ describe('AgentRequestMetrics', () => {
     await Bun.sleep(2);
     m.markVisible();
     expect(m.snapshot('normal', delivered, 0).firstVisibleMs).toBe(first);
+  });
+});
+
+test('mixed native and compatible rounds expose incomplete fresh/write aggregates', () => {
+  const metrics = new AgentRequestMetrics();
+  metrics.recordRound(
+    round({
+      promptTokens: 27,
+      completionTokens: 2,
+      totalTokens: 29,
+      cachedTokens: 20,
+      reasoningTokens: 0,
+      freshInputTokens: 7,
+      cacheWriteTokens: 0,
+    }),
+  );
+  metrics.recordRound(
+    round({ promptTokens: 10, completionTokens: 2, totalTokens: 12, cachedTokens: null, reasoningTokens: 0 }),
+  );
+  const snapshot = metrics.snapshot('normal', { outcome: 'delivered', messageIds: [] }, 0);
+  expect(snapshot).toMatchObject({
+    freshInputTokens: 7,
+    cacheWriteTokens: 0,
+    freshInputTokensMissingRounds: 1,
+    cacheWriteTokensMissingRounds: 1,
+  });
+  const summary = summarizeAiLogs([{ msg: 'AI request metric', ...snapshot }]);
+  expect(summary.tokens.tokenCoverage).toMatchObject({
+    freshInput: { sum: 7, reportedRows: 1, unknownRows: 0, missingRounds: 1 },
+    cacheWrite: { sum: 0, reportedRows: 1, unknownRows: 0, missingRounds: 1 },
   });
 });

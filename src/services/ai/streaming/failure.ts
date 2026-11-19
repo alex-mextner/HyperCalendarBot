@@ -9,7 +9,7 @@ import { getClaudeCredentialAvailability } from '../claude-credential-pool.ts';
 import { type Admission, type CircuitContext, settleFailure, settleInconclusive } from '../provider-circuit.ts';
 import type { ProviderId } from '../provider-ids.ts';
 import { classifyProviderError } from '../usage-classification.ts';
-import { type AttemptScope, failedAttempt } from '../usage-recorder.ts';
+import { type AiTokenUsage, type AttemptScope, failedAttempt } from '../usage-recorder.ts';
 import { isProviderDown, isTransientProviderError } from './error-classification.ts';
 import { EmptyProviderResponseError } from './errors.ts';
 import { aiLogger } from './logger.ts';
@@ -51,6 +51,7 @@ export function failureAttempt(
   callerAborted: boolean,
   attemptAt: number,
   attemptStartedAt: number,
+  observedNativeUsage: AiTokenUsage | null = null,
 ): AiUsageEvent {
   const durationMs = Math.round(Math.max(0, performance.now() - attemptStartedAt));
   if (error instanceof EmptyProviderResponseError) {
@@ -72,7 +73,7 @@ export function failureAttempt(
     attemptAt,
     durationMs,
     classifyProviderError(error, callerAborted),
-    null,
+    slot.provider === 'claude' ? observedNativeUsage : null,
   );
 }
 

@@ -1,6 +1,6 @@
 // src/services/ai/clients.ts
 // OpenAI SDK clients for all AI providers (z.ai, HuggingFace Router, Claude, OpenRouter).
-// All use the same OpenAI SDK — only baseURL and apiKey differ.
+// Claude uses the SDK HTTP/SSE primitives for native Messages; other providers use chat completions.
 // Keys come from env via loadConfig(); Claude has a fixed public endpoint.
 
 import OpenAI from 'openai';
@@ -55,19 +55,22 @@ export function openrouterClient(): OpenAI {
 }
 
 /**
- * Anthropic's OpenAI-compatible endpoint. Chat completions accept the bearer key alone,
- * but `GET /v1/models` (live-model discovery) is the native API and rejects a request
- * without `anthropic-version`.
+ * Native Messages use the selected credential through the same SDK and credential pool.
+ * `GET /v1/models` (live-model discovery) also requires `anthropic-version`.
  */
 export function claudeClient(): OpenAI {
   if (!claude) {
     const cfg = loadConfig();
-    claude = createClaudeClient([cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2], {
-      baseURL: 'https://api.anthropic.com/v1/',
-      defaultHeaders: { 'anthropic-version': '2023-06-01' },
-      timeout: DEFAULT_TIMEOUT_MS,
-      maxRetries: 0,
-    });
+    claude = createClaudeClient(
+      [cfg.CLAUDE_API_TOKEN, cfg.CLAUDE_API_TOKEN2],
+      {
+        baseURL: 'https://api.anthropic.com/v1/',
+        defaultHeaders: { 'anthropic-version': '2023-06-01' },
+        timeout: DEFAULT_TIMEOUT_MS,
+        maxRetries: 0,
+      },
+      cfg.AI_CLAUDE_TRANSPORT ?? 'native',
+    );
   }
   return claude;
 }

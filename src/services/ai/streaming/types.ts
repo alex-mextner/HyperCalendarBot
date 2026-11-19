@@ -33,6 +33,7 @@ export interface StreamRoundOptions {
 }
 
 export interface FailedHttpAttempt {
+  usage?: AiTokenUsage | null;
   error: unknown;
   model: string;
   startedAt: number;
@@ -40,6 +41,8 @@ export interface FailedHttpAttempt {
 }
 
 export interface StreamCallbacks {
+  /** Internal request-owned native usage; never attached to a shared abort reason. */
+  onNativeUsage?: (usage: AiTokenUsage) => void;
   /** Internal failed completion metadata; recorded on the next HTTP start or terminal exit. */
   onCredentialRetry?: (attempt: FailedHttpAttempt) => void;
   onTextDelta?: (text: string) => void;

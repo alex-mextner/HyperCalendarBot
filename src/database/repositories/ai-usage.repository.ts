@@ -49,6 +49,11 @@ export interface AiUsageEvent {
   completionTokens: number | null;
   reasoningTokens: number | null;
   cachedTokens: number | null;
+  /** Native input is disjoint from cache reads/writes; omitted historical values remain unknown. */
+  freshInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  /** SHA-256 prefix of the actual selected credential, never the credential itself. */
+  credentialId?: string | null;
   /** Opaque per-agent-run correlation id. */
   requestId: string | null;
   /** Routing role (`planner`, `executor`, `repair`) of a role-routed attempt; null on a legacy chain. */
@@ -82,6 +87,9 @@ interface AiUsageRecord {
   completion_tokens: number | null;
   reasoning_tokens: number | null;
   cached_tokens: number | null;
+  fresh_input_tokens: number | null;
+  cache_write_tokens: number | null;
+  credential_id: string | null;
   request_id: string | null;
   role: string | null;
   preset: string | null;
@@ -104,8 +112,8 @@ export class AiUsageRepository {
       `INSERT INTO ai_usage_events
          (at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
           prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
-          role, preset, cost_micro_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          role, preset, cost_micro_usd, fresh_input_tokens, cache_write_tokens, credential_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.db.transaction(() => {
       for (const e of events) {
@@ -128,6 +136,9 @@ export class AiUsageRepository {
           e.role,
           e.preset,
           e.costMicroUsd,
+          e.freshInputTokens ?? null,
+          e.cacheWriteTokens ?? null,
+          e.credentialId ?? null,
         );
       }
     })();
@@ -138,7 +149,7 @@ export class AiUsageRepository {
     const page = this.db.prepare<AiUsageRecord, [number, number, number]>(
       `SELECT id, at, provider, model, chain, purpose, outcome, error_class, http_status, skip_reason, duration_ms,
               prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, request_id,
-              role, preset, cost_micro_usd
+              role, preset, cost_micro_usd, fresh_input_tokens, cache_write_tokens, credential_id
        FROM ai_usage_events WHERE at >= ? AND id > ? ORDER BY id LIMIT ?`,
     );
     let afterId = 0;
@@ -165,6 +176,13 @@ export class AiUsageRepository {
           role: row.role,
           preset: row.preset,
           costMicroUsd: row.cost_micro_usd,
+          ...(row.credential_id === null
+            ? {}
+            : {
+                freshInputTokens: row.fresh_input_tokens,
+                cacheWriteTokens: row.cache_write_tokens,
+                credentialId: row.credential_id,
+              }),
         };
         afterId = row.id;
       }

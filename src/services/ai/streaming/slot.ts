@@ -5,7 +5,10 @@
 
 import type OpenAI from 'openai';
 import { logOnce } from '../../../utils/logger.ts';
-import { withClaudeCredentials } from '../claude-client-pool.ts';
+import { usesNativeClaude, withClaudeCredentials } from '../claude-client-pool.ts';
+import { nativeConsumedReplay, rememberNativeAssistant } from '../claude-native-content.ts';
+import { prepareNativeRequest } from '../claude-native-request.ts';
+import { openNativeClaudeStream } from '../claude-native-stream.ts';
 import { type ModelPreset, type ModelRole, presetRequestFields } from '../model-presets.ts';
 import { getModelOverride } from '../model-registry.ts';
 import type { ProviderId } from '../provider-ids.ts';
@@ -19,7 +22,7 @@ import {
   normalizeUsage,
 } from './response-shape.ts';
 import { providerTimeoutCapMs } from './round-budget.ts';
-import { consumeStream } from './stream-reader.ts';
+import { type ConsumedStream, consumeStream } from './stream-reader.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from './types.ts';
 
 export interface ProviderSlot {
@@ -115,7 +118,9 @@ async function openCompletionStream(
   onHttpAttempt: () => void,
   deadlineAt: number,
   onCredentialRetry: StreamCallbacks['onCredentialRetry'],
+  onNativeUsage: StreamCallbacks['onNativeUsage'],
 ): Promise<{ stream: AsyncIterable<OpenAI.ChatCompletionChunk>; startedAt: number }> {
+  const native = usesNativeClaude(client) ? prepareNativeRequest(params) : null;
   let startedAt = performance.now();
   let attemptAt = Date.now();
   let stream: AsyncIterable<OpenAI.ChatCompletionChunk>;
@@ -133,13 +138,16 @@ async function openCompletionStream(
   });
   try {
     startedAt = performance.now();
-    stream = await withClaudeCredentials(
+    stream = await withClaudeCredentials<AsyncIterable<OpenAI.ChatCompletionChunk>>(
       client,
-      (candidate, attemptSignal) => candidate.chat.completions.create(params, { signal: attemptSignal }),
+      (candidate, attemptSignal) =>
+        native
+          ? openNativeClaudeStream(candidate, native, attemptSignal, onNativeUsage)
+          : candidate.chat.completions.create(params, { signal: attemptSignal }),
       requestOptions(),
     );
   } catch (error) {
-    if (!rejectsUsageStreamOption(error)) throw error;
+    if (usesNativeClaude(client) || !rejectsUsageStreamOption(error)) throw error;
     onCredentialRetry?.({
       error,
       model: params.model,
@@ -165,6 +173,13 @@ async function openCompletionStream(
     );
   }
   return { stream, startedAt };
+}
+
+function invalidToolResponse(client: OpenAI, consumed: ConsumedStream): boolean {
+  return (
+    hasInvalidToolCalls(consumed.toolFragmentCount, consumed.toolCalls) ||
+    (usesNativeClaude(client) && consumed.toolCalls.length > 0 && !nativeConsumedReplay(consumed))
+  );
 }
 
 /**
@@ -205,6 +220,7 @@ export function streamingSlot(
         onHttpAttempt,
         opts.providerDeadlineAt ?? performance.now() + providerTimeoutCapMs(opts),
         cbs.onCredentialRetry,
+        cbs.onNativeUsage,
       );
       const consumed = await consumeStream(
         stream,
@@ -215,7 +231,7 @@ export function streamingSlot(
       );
       const { text, toolCalls, finishReason, firstUsableMs, refusalSeen } = consumed;
 
-      const invalidTools = hasInvalidToolCalls(consumed.toolFragmentCount, toolCalls);
+      const invalidTools = invalidToolResponse(client, consumed);
       const normalizedUsage = normalizeUsage(consumed.usage);
       const diagnostics = buildResponseDiagnostics({
         refusalSeen,
@@ -239,7 +255,10 @@ export function streamingSlot(
         text,
         toolCalls,
         finishReason,
-        assistantMessage: buildAssistantMessage(text, toolCalls),
+        assistantMessage: rememberNativeAssistant(
+          buildAssistantMessage(text, toolCalls),
+          nativeConsumedReplay(consumed),
+        ),
         providerUsed: slotName(label, model),
         metrics: {
           provider,

@@ -4,11 +4,25 @@ import { SPEND_LIMIT_REJECTION } from './claude-credential-pool.ts';
 
 export interface ProviderErrorClassification {
   errorClass: AiErrorClass;
-  /** HTTP status the provider answered with; null when it never answered. */
+  /** HTTP status reported by the SDK; null when unavailable, including native SSE errors. */
   httpStatus: number | null;
 }
 
 const CONNECTION_FAULT_CODES = ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENETUNREACH', 'ENOTFOUND'];
+// Native SSE error events have a semantic type but no SDK HTTP status. Reuse the category
+// rules without assigning a synthetic status to the error or changing retry/routing policy.
+const STREAM_ERROR_CATEGORIES: ReadonlyMap<string, number> = new Map([
+  ['invalid_request_error', 400],
+  ['authentication_error', 401],
+  ['permission_error', 403],
+  ['not_found_error', 404],
+  // Semantic bad_request; this repository reserves status 413 for rate limiting. HTTP status stays null.
+  ['request_too_large', 400],
+  ['rate_limit_error', 429],
+  ['api_error', 500],
+  ['overloaded_error', 529],
+]);
+
 /** Providers word a spent quota or balance differently; the status alone cannot tell it from a burst limit. */
 const QUOTA_WORDING =
   /exceeded your current quota|quota (?:exceeded|exhausted|reset)|limit exhausted|insufficient (?:balance|funds|credit)|credit balance/i;
@@ -62,7 +76,8 @@ function classifySdkError(
   if (typeof error.status === 'number') {
     return { errorClass: classifyStatus(error.status, error.message), httpStatus: error.status };
   }
-  return { errorClass: 'other', httpStatus: null };
+  const category = STREAM_ERROR_CATEGORIES.get(error.type ?? '');
+  return { errorClass: category === undefined ? 'other' : classifyStatus(category, error.message), httpStatus: null };
 }
 
 /** A non-SDK error: a deadline or abort from the runtime, or a socket-level fault carrying an errno code. */

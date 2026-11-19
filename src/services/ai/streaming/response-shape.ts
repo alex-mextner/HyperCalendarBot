@@ -7,6 +7,7 @@ import type OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
 import { z } from 'zod';
 import { jsonCodec } from '../../../utils/json-codec.ts';
+import { nativeUsageDetails } from '../claude-native-usage.ts';
 import type { EmptyResponseDiagnostics, StreamTokenUsage, StreamToolCall } from './types.ts';
 
 const toolArgumentsCodec = jsonCodec(z.record(z.string(), z.json()));
@@ -28,6 +29,7 @@ export function normalizeUsage(usage: CompletionUsage | null): StreamTokenUsage 
     cachedTokens: finite(usage.prompt_tokens_details?.cached_tokens),
     reasoningTokens: finite(usage.completion_tokens_details?.reasoning_tokens),
     ...(reportedCost === null ? {} : { costUsd: reportedCost }),
+    ...nativeUsageDetails(usage),
   };
 }
 

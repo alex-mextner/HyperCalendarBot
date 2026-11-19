@@ -98,12 +98,14 @@ export interface EnvConfig {
   MTPROTO_SERVICE_USER_ID?: number;
   // Whisper voice transcription only; Groq is not an AI chat provider any more
   GROQ_API_KEY?: string;
-  // Anthropic Claude (primary when configured; OpenAI-compatible endpoint)
+  // Anthropic Claude (primary when configured; native Messages supports prompt caching)
   CLAUDE_API_TOKEN?: string;
   /** Independent backup credential, used with the same Claude models and request settings. */
   CLAUDE_API_TOKEN2?: string;
   CLAUDE_MODEL?: string;
   CLAUDE_FAST_MODEL?: string;
+  /** Native Messages by default; openai is a scoped transport rollback without changing provider order. */
+  AI_CLAUDE_TRANSPORT?: 'native' | 'openai';
   // OpenRouter (optional; serves DeepSeek and GLM Flash behind one key). Used only when
   // a chain names it and both the key and that chain's model are set.
   OPENROUTER_API_KEY?: string;
@@ -238,6 +240,10 @@ function parseTelegramSessionMasterKey(): string | undefined {
 
 export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
+  const claudeTransport = optionalEnv('AI_CLAUDE_TRANSPORT') ?? 'native';
+  if (claudeTransport !== 'native' && claudeTransport !== 'openai') {
+    throw new Error('AI_CLAUDE_TRANSPORT must be native or openai');
+  }
   const toolSchemaMode = parseToolSchemaMode();
   const aiRouting = parseAiRouting();
   const aiRoutingUserIds = parseUserIdList('AI_ROUTING_USER_IDS');
@@ -290,6 +296,7 @@ export function loadConfig(): EnvConfig {
     CLAUDE_API_TOKEN2: optionalEnv('CLAUDE_API_TOKEN2'),
     CLAUDE_MODEL: optionalEnv('CLAUDE_MODEL'),
     CLAUDE_FAST_MODEL: optionalEnv('CLAUDE_FAST_MODEL'),
+    AI_CLAUDE_TRANSPORT: claudeTransport,
     OPENROUTER_API_KEY: optionalEnv('OPENROUTER_API_KEY'),
     OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || DEFAULT_OPENROUTER_BASE_URL,
     OPENROUTER_MODEL: optionalEnv('OPENROUTER_MODEL'),

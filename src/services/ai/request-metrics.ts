@@ -18,7 +18,12 @@ export interface AgentRequestMetricSnapshot {
   completionTokens: number;
   reportedTotalTokens: number;
   reasoningTokens: number;
-  cachedTokens: number;
+  cachedTokens: number | null;
+  freshInputTokens: number | null;
+  cacheWriteTokens: number | null;
+  cachedTokensMissingRounds: number;
+  freshInputTokensMissingRounds: number;
+  cacheWriteTokensMissingRounds: number;
   usageMissingRounds: number;
   usagePartialRounds: number;
   termination: AgentTermination;
@@ -44,6 +49,11 @@ export class AgentRequestMetrics {
   private reportedTotalTokens = 0;
   private reasoningTokens = 0;
   private cachedTokens = 0;
+  private cachedTokenReports = 0;
+  private freshInputTokens = 0;
+  private freshInputReports = 0;
+  private cacheWriteTokens = 0;
+  private cacheWriteReports = 0;
   private usageMissingRounds = 0;
   private usagePartialRounds = 0;
 
@@ -78,7 +88,18 @@ export class AgentRequestMetrics {
     this.completionTokens += usage.completionTokens ?? 0;
     this.reportedTotalTokens += usage.totalTokens ?? 0;
     this.reasoningTokens += usage.reasoningTokens ?? 0;
-    this.cachedTokens += usage.cachedTokens ?? 0;
+    if (usage.cachedTokens !== null) {
+      this.cachedTokens += usage.cachedTokens;
+      this.cachedTokenReports++;
+    }
+    if (typeof usage.freshInputTokens === 'number') {
+      this.freshInputTokens += usage.freshInputTokens;
+      this.freshInputReports++;
+    }
+    if (typeof usage.cacheWriteTokens === 'number') {
+      this.cacheWriteTokens += usage.cacheWriteTokens;
+      this.cacheWriteReports++;
+    }
   }
 
   recordFailedRound(durationMs: number, attempts: number, fallbacks: number): void {
@@ -111,7 +132,12 @@ export class AgentRequestMetrics {
       completionTokens: this.completionTokens,
       reportedTotalTokens: this.reportedTotalTokens,
       reasoningTokens: this.reasoningTokens,
-      cachedTokens: this.cachedTokens,
+      cachedTokens: this.cachedTokenReports ? this.cachedTokens : null,
+      freshInputTokens: this.freshInputReports ? this.freshInputTokens : null,
+      cacheWriteTokens: this.cacheWriteReports ? this.cacheWriteTokens : null,
+      cachedTokensMissingRounds: this.modelCalls - this.cachedTokenReports,
+      freshInputTokensMissingRounds: this.modelCalls - this.freshInputReports,
+      cacheWriteTokensMissingRounds: this.modelCalls - this.cacheWriteReports,
       usageMissingRounds: this.usageMissingRounds,
       usagePartialRounds: this.usagePartialRounds,
       termination,
