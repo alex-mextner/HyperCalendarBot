@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the root side of the per-PR stage QA (#840) on the odroid, by hand, as root, from a
+# Installs the root side of the per-PR stage QA (#840) on the production host (the Banana Pi), by hand, as root, from a
 # reviewed main checkout:   sudo scripts/install-stage-qa.sh [<checkout>]   (default: the cwd)
 #
 # Why by hand: root runs everything installed here on behalf of PR runs, so it must come from code

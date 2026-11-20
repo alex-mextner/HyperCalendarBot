@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Log retention for /opt/hypercal/logs: rotate by size AND free disk, never by deploy or rollback.
 
-Accessed via: a systemd timer / cron on the odroid (as root) running `log-retention.py --root
+Accessed via: a root systemd timer on the production host running `log-retention.py --root
 <logs dir> --alert`; deploy and rollback scripts never call it and never delete logs themselves, so
 the evidence of a failed release always survives until this script's limits genuinely force it out.
 

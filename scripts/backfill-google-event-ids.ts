@@ -14,8 +14,8 @@
  * re-run: linked rows are no longer candidates.
  *
  * Usage (production, from the host):
- *   ssh root@odroidn2 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts'
- *   ssh root@odroidn2 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts --apply'
+ *   ssh root@bananapi-m4 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts'
+ *   ssh root@bananapi-m4 'docker exec hypercal-bot bun run scripts/backfill-google-event-ids.ts --apply'
  * Options: --database PATH (default $DATABASE_PATH or ./data/calendar.db), --backup PATH, --include-slot-matches.
  */
 

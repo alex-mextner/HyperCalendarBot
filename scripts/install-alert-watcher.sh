@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) action="uninstall" ;;
     --dry-run) dry_run=1 ;;
     --fetch-token-from)
-      [[ $# -ge 2 ]] || die "--fetch-token-from needs a host (for example root@odroidn2)"
+      [[ $# -ge 2 ]] || die "--fetch-token-from needs a host (for example root@bananapi-m4)"
       fetch_host="$2"
       shift
       ;;
@@ -124,7 +124,7 @@ fi
 
 if ! "$keychain_bin" exists --caller "$CALLER" "$SECRET_REF"; then
   if [[ -z "$fetch_host" ]]; then
-    die "the alert token is not in the keychain. Store it with: keychain set --caller $CALLER $SECRET_REF (hidden prompt), or copy production's with: $0 --fetch-token-from root@odroidn2"
+    die "the alert token is not in the keychain. Store it with: keychain set --caller $CALLER $SECRET_REF (hidden prompt), or copy production's with: $0 --fetch-token-from root@bananapi-m4"
   fi
   if ((dry_run)); then
     echo "dry run: would copy ADMIN_ALERT_TOKEN from $fetch_host:$REMOTE_ENV_FILE into the keychain as $SECRET_REF"

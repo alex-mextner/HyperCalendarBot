@@ -1,15 +1,15 @@
 # Per-PR stage QA, part 2 of 2 (#840; runbook "Stage QA"): run the PR's image as the stage bot on the
-# odroid, drive it with real Telegram messages through qa-cli, and post the required `stage-qa` status.
+# production host (the Banana Pi `bananapi-m4`), drive it with real Telegram messages through qa-cli, and post the required `stage-qa` status.
 #
 # Trust boundary. A `workflow_run` workflow always runs the copy of this file on the default branch,
 # so a pull request cannot change what runs on the QA runner. This file never checks out code and never
 # downloads or uploads an artifact: the qa job passes the head SHA (and its short-lived token) to the root-installed
 # driver /usr/local/lib/hypercal-stage/stage-qa-driver.py (installed by hand from a reviewed checkout of main). The
-# driver asks the root wrapper on the odroid (sudo, one file) to verify that SHA against GitHub, start the stage bot
+# driver asks the root wrapper on the production host (sudo, one file) to verify that SHA against GitHub, start the stage bot
 # and tear it down, and hands the stage's READY line to the browser host (the server) over an ssh key limited to
 # one forced command; there qa-cli (Telegram Web in a headless Chromium) sends the messages and reads the replies.
-# The job runs on its own runner (label stage-qa, its own user) on the odroid: a queue of stage runs can never
-# delay a production deploy on the odroid-hcb runner, and no browser runs on the odroid.
+# The job runs on its own runner (`bananapi-hcb-qa`, label stage-qa, user hcb-qa, not the deploy user) on the Banana: a queue of stage runs can
+# never delay a production deploy on the bananapi-hcb runner, and no browser runs on the production host.
 name: Stage QA
 
 on:
@@ -45,7 +45,7 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
-      # Read only: the stage-qa verdict is posted by the hosted `report` job, never from the odroid.
+      # Read only: the stage-qa verdict is posted by the hosted `report` job, never from the production host.
       statuses: read
     outputs:
       rc: ${{ steps.run.outputs.rc }}

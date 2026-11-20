@@ -3,7 +3,7 @@
 # Deploys an exact Git commit via git archive; never copies the working tree.
 set -euo pipefail
 
-HOST="${HYPERCAL_DEPLOY_HOST:-root@odroidn2}"
+HOST="${HYPERCAL_DEPLOY_HOST:-root@bananapi-m4}"
 DEPLOY_PATH="${HYPERCAL_DEPLOY_PATH:-/opt/hypercal}"
 IMAGE="${HYPERCAL_IMAGE:-ghcr.io/alex-mextner/hypercalendarbot}"
 REF="origin/main"
@@ -29,8 +29,8 @@ Local linux/arm64 image builder (HYPERCAL_BUILD_BACKEND, default auto):
              (default `default`) via HYPERCAL_DOCKER_BIN. On an x86_64 Linux host
              it needs binfmt_misc/QEMU arm64 emulation registered (e.g.
              tonistiigi/binfmt) and builds far slower than native.
-Production is the home ODROID-N2+ (aarch64, root@odroidn2 over Tailscale) since
-2026-10-09. Colima is not a supported builder on the dev Mac (removed 2026-09-26);
+Production is the home Banana Pi BPI-M4 (aarch64, root@bananapi-m4 over Tailscale) since
+2026-11-20 (#1015; the ODROID-N2+ before). Colima is not a supported builder on the dev Mac (removed 2026-09-26);
 do not reinstall it or any other Docker VM for this script.
 EOF
 }
@@ -76,7 +76,7 @@ git merge-base --is-ancestor "$SHA" origin/main
 [[ "$HOST" =~ ^[a-zA-Z0-9_@.-]+$ ]] || exit 2
 [[ "$IMAGE" =~ ^[a-z0-9][a-z0-9./_-]*$ ]] || exit 2
 # Stage on the deploy path's disk in the activator's release namespace, not /tmp: /tmp on
-# the odroid is a 1.9 GB tmpfs in its 3.7 GB of RAM, too small for source plus image archive.
+# the Banana Pi is a RAM tmpfs (1.7 GB of RAM in all), too small for source plus image archive.
 REMOTE_SRC="$DEPLOY_PATH/.incoming-$SHA-$(date +%s)-$$"
 LOCAL_SRC="$(mktemp -d)"
 trap 'rm -rf "$LOCAL_SRC"' EXIT

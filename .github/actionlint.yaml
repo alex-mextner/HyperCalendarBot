@@ -4,9 +4,9 @@
 # Both labels were read from the runners registered on the repository
 # (`gh api repos/alex-mextner/HyperCalendarBot/actions/runners`); add a label here only when a
 # registered runner actually carries it:
-#   odroid-hcb  label of the runner named `odroid-hcb` (Linux ARM64), the home ODROID-N2+ — deploy.yml
-#   stage-qa    label of the runner named `odroid-hcb-qa` (Linux ARM64), the odroid's Stage QA runner — stage-qa.yml
+#   bananapi-hcb  label of the runner named `bananapi-hcb` (Linux ARM64), the home Banana Pi BPI-M4 — deploy.yml
+#   stage-qa      label of the runner named `bananapi-hcb-qa` (Linux ARM64), the Banana's Stage QA runner — stage-qa.yml
 self-hosted-runner:
   labels:
-    - odroid-hcb
+    - bananapi-hcb
     - stage-qa

@@ -95,7 +95,7 @@ export class RenderFailureReporter {
       `held back since the last alert: ${this.held}`,
       uncertain
         ? 'The upload started and its end is unknown: the picture may have reached the chat. The user was NOT told it failed.'
-        : 'The user got one short note and the text answer. Look for "Image delivery failed" and "Image delivery outcome" (outcome=failed) in the container log on root@odroidn2.',
+        : 'The user got one short note and the text answer. Look for "Image delivery failed" and "Image delivery outcome" (outcome=failed) in the container log on root@bananapi-m4.',
     ].join('\n');
     try {
       this.push(text, RENDER_FAILURE_ALERT_SOURCE);
