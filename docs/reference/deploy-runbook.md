@@ -254,7 +254,7 @@ Why: the odroid was memory-starved (3.7 GB shared with every bot, Home Assistant
 What moved: the Compose stack (`/opt/hypercal`, project `hypercalinvntrmru`, same container names and port 3001), all data including Redis's AOF and RDB, the deploy runner (`odroid-hcb` -> `bananapi-hcb`) and the stage QA runner (`odroid-hcb-qa` -> `bananapi-hcb-qa`), the root cron jobs (now systemd timers) and the public ingress (tunnel `odroid-home` -> `bananapi-m4`).
 
 Procedure:
-1. Stop the odroid runners `odroid-hcb` and `odroid-hcb-qa`, so no deploy or stage run starts during the copy.
+1. Stop and disable the odroid runners `odroid-hcb` and `odroid-hcb-qa` (`systemctl disable --now` their `actions.runner.*` units), so no deploy or stage run starts during the copy and a reboot of the odroid cannot bring a second `stage-qa` runner back.
 2. On the odroid stop the bot, then `BGSAVE` in redis (wait for it to finish) and stop redis, so the AOF and RDB are final.
 3. Copy `/opt/hypercal` (`data/`, `logs/`, `releases/`, `stage/`, `.env` and the rest) and the redis volume to the Banana with numeric owner ids preserved (`rsync -aHAX --numeric-ids`).
 4. Start the stack on the Banana with the same image the odroid ran (loaded from the same release archive, never pulled).
@@ -264,7 +264,7 @@ Procedure:
 8. Once the Banana is confirmed, remove the odroid runners' registrations (`odroid-hcb`, `odroid-hcb-qa`: `config.sh remove` or the repository's runner settings) and delete the odroid's copy of the browser-host key (`/var/lib/hcb-qa-runner/.ssh/hypercal-stage-browser_ed25519`): the key moved unchanged, so the odroid's copy would still open the browser host.
 
 Rollback (the odroid's `/opt/hypercal` and redis volume stay untouched until the odroid is reinstalled):
-1. On the Banana stop the stack and keep it from coming back at boot: `systemctl disable --now compose@hypercalinvntrmru.service` (and `docker stop hypercal-bot hypercal-redis` if they still run). Two bots with the same token would answer twice and run every delayed job twice.
+1. On the Banana stop the stack and keep it from coming back at boot: `systemctl disable --now compose@hypercalinvntrmru.service` and the runner units of `bananapi-hcb` and `bananapi-hcb-qa` (a push to main would otherwise deploy there and restart the bot), then `docker stop hypercal-bot hypercal-redis` if they still run. Two bots with the same token would answer twice and run every delayed job twice.
 2. Re-add the rule `hypercal.mextner.com` -> `http://localhost:3001` to the tunnel `odroid-home` (it was removed from that tunnel) and point the CNAME back to it.
 3. Anything written on the Banana in the meantime (calendar database, redis state, logs) has to be copied back to the odroid before it starts.
 4. On the odroid `docker start hypercal-redis hypercal-bot`, then verify `/health` and `/ready`.
