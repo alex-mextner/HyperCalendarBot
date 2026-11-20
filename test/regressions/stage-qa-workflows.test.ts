@@ -1,6 +1,6 @@
 // biome-ignore-all lint/suspicious/noTemplateCurlyInString: the workflow contract pins literal GitHub Actions expressions
 // Contract of the per-PR stage QA check (#840): PR code is built on a GitHub-hosted runner and only a
-// workflow_run workflow from the default branch reaches the odroid, carrying a SHA and never code.
+// workflow_run workflow from the default branch reaches the production host, carrying a SHA and never code.
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,7 +66,7 @@ function getStep(file: string, id: string, name: string) {
   return found;
 }
 
-describe('Stage build: the pull request image is built on GitHub, never on the odroid', () => {
+describe('Stage build: the pull request image is built on GitHub, never on the production host', () => {
   const build = load('stage-build.yml');
   const buildJob = getJob('stage-build.yml', 'build');
 
@@ -80,7 +80,7 @@ describe('Stage build: the pull request image is built on GitHub, never on the o
     expect(buildJob['runs-on']).toBe('ubuntu-24.04-arm');
     const labels = JSON.stringify(build);
     expect(labels).not.toContain('self-hosted');
-    expect(labels).not.toContain('odroid');
+    expect(labels).not.toContain('bananapi');
   });
 
   test('skips forks, drafts and bot-authored pull requests', () => {
@@ -157,11 +157,11 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
     expect(qaWorkflow.permissions).toEqual({});
   });
 
-  // The qa job runs on its own runner (user and label) on the odroid; the browser half runs on the server. It is its own
-  // label: the production deploy runner (odroid-hcb) must never receive a stage job or the reverse.
+  // The qa job runs on its own runner (user and label) on the Banana Pi; the browser half runs on the server. It is its own
+  // label: the production deploy runner (bananapi-hcb) must never receive a stage job or the reverse.
   test('qa runs on the stage-qa runner label, never on the deploy runner label', () => {
     expect(qa['runs-on']).toEqual(['self-hosted', 'stage-qa']);
-    expect(JSON.stringify(qaWorkflow)).not.toContain('odroid-hcb');
+    expect(JSON.stringify(qaWorkflow)).not.toContain('bananapi-hcb');
     expect(JSON.stringify(load('deploy.yml').jobs.deploy?.['runs-on'])).not.toContain('stage-qa');
   });
 
@@ -190,7 +190,7 @@ describe('Stage QA: the trusted workflow_run workflow is the only way onto the s
     for (const entry of [...qa.steps, ...report.steps]) expect(entry.run ?? '').not.toContain('${{');
   });
 
-  test('qa hands the installed odroid driver the head SHA as its only argument and the token on stdin', () => {
+  test('qa hands the installed driver the head SHA as its only argument and the token on stdin', () => {
     const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
     expect(run.env?.HEAD_SHA).toBe('${{ github.event.workflow_run.head_sha }}');
     expect(run.run).toContain(`printf '%s\\n' "$GH_TOKEN" | ${INSTALLED_DRIVER_CMD} "$HEAD_SHA"`);
@@ -262,7 +262,7 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
       if (!triggers.includes('workflow_run')) continue;
       for (const [id, entry] of Object.entries(parsed.jobs)) {
         const labels = [entry['runs-on'] ?? []].flat().map(String);
-        if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
+        if (!labels.some((label) => label === 'self-hosted' || label.startsWith('bananapi'))) continue;
         const uses = (entry.steps ?? []).map((candidate) => candidate.uses ?? '');
         expect({
           file,
@@ -278,14 +278,14 @@ describe('the self-hosted stage job is the only extra self-hosted job and no wor
   });
 });
 
-// #858: the stage QA runner on the odroid (labels self-hosted, Linux, ARM64 and stage-qa) runs the driver that holds the secrets for the browser host.
+// #858: the stage QA runner on the Banana Pi (labels self-hosted, Linux, ARM64 and stage-qa) runs the driver that holds the secrets for the browser host.
 // It must take only the stage QA job, so no workflow may name the generic self-hosted label (or the default OS and
 // architecture labels, or an expression/runner group nobody can resolve statically) outside a job listed here.
 describe('runner labels: only an explicitly allowed job may leave the GitHub-hosted runners', () => {
   const GITHUB_HOSTED_LABEL = /^(?:ubuntu|macos|windows)-[a-z0-9.-]+$/i;
-  // `<file>#<job id>` -> the exact runs-on labels. stage-qa and odroid-hcb exist only on the odroid, each on its own runner.
+  // `<file>#<job id>` -> the exact runs-on labels. stage-qa and bananapi-hcb exist only on the Banana Pi, each on its own runner.
   const ALLOWED_SELF_HOSTED: Record<string, readonly string[]> = {
-    'deploy.yml#deploy': ['self-hosted', 'odroid-hcb'],
+    'deploy.yml#deploy': ['self-hosted', 'bananapi-hcb'],
     'stage-qa.yml#qa': ['self-hosted', 'stage-qa'],
   };
   const runsOn = z.union([
@@ -354,7 +354,7 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     }
   };
 
-  test('the repository workflows leave the GitHub-hosted runners only for the odroid deploy and the odroid stage QA job', () => {
+  test('the repository workflows leave the GitHub-hosted runners only for the Banana deploy and the Banana stage QA job', () => {
     expect(runnerViolations(WORKFLOWS)).toEqual([]);
   });
 
@@ -380,11 +380,11 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     }
   });
 
-  test('the stage-qa and odroid-hcb labels are not enough outside their own job', () => {
+  test('the stage-qa and bananapi-hcb labels are not enough outside their own job', () => {
     for (const [file, body] of [
       ['stray.yml', '    runs-on: [self-hosted, stage-qa]\n'],
       ['stray.yml', '    runs-on: stage-qa\n'],
-      ['stray.yml', '    runs-on: [self-hosted, odroid-hcb]\n'],
+      ['stray.yml', '    runs-on: [self-hosted, bananapi-hcb]\n'],
     ] as const) {
       withWorkflow(file, body, (violations) => {
         expect(violations.filter((line) => line.startsWith('stray.yml#stray'))).toHaveLength(1);
@@ -418,10 +418,10 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
     });
   });
 
-  test('exactly one job names stage-qa (the stage QA job) and exactly one names odroid-hcb (the deploy job)', () => {
+  test('exactly one job names stage-qa (the stage QA job) and exactly one names bananapi-hcb (the deploy job)', () => {
     const owners: Record<string, string[]> = {
       'stage-qa': ['stage-qa.yml#qa'],
-      'odroid-hcb': ['deploy.yml#deploy'],
+      'bananapi-hcb': ['deploy.yml#deploy'],
     };
     for (const [label, expected] of Object.entries(owners)) {
       const namers = readdirSync(WORKFLOWS)
@@ -436,7 +436,7 @@ describe('runner labels: only an explicitly allowed job may leave the GitHub-hos
   });
 });
 
-describe('the qa step: runs the odroid driver and reports its exit code and case count', () => {
+describe('the qa step: runs the stage driver and reports its exit code and case count', () => {
   const run = getStep('stage-qa.yml', 'qa', 'Run the stage QA through qa-cli');
 
   async function runQa(wrapperExit: number, wrapperOutput: string) {
@@ -497,7 +497,7 @@ describe('the qa step: runs the odroid driver and reports its exit code and case
     expect(result.outputs).toEqual({ rc: '1', cases: '6' });
   });
 
-  // #858: the odroid driver exits 4 when the odroid could not load the image or start compose.
+  // #858: the driver exits 4 when the production host could not load the image or start compose.
   test('an infrastructure failure of the stage host publishes rc 4, the case count and the exit code', async () => {
     const result = await runQa(4, `STAGE_QA_RESULT status=infra-error sha=${SHA} cases=0 failed=0`);
     expect(result.exitCode).toBe(4);
@@ -604,7 +604,7 @@ describe('the report step: stage-qa status for the exact head, truthful in every
     }
   });
 
-  // #858: an image-load or compose-up failure on the odroid is the stage host's fault, not the pull request's.
+  // #858: an image-load or compose-up failure on the production host is the stage host's fault, not the pull request's.
   test('a stage infrastructure failure (image load, compose up) posts error with a could-not-run description, not failure', async () => {
     const { exitCode, posts } = await runReport({ QA_RESULT: 'failure', QA_RC: '4', QA_CASES: '0' });
     expect(exitCode).toBe(0);

@@ -61,7 +61,7 @@ test('the build uploads the checked release as one artifact named for the commit
 });
 
 // Only the GitHub-hosted build job can say which artifact is the release: anything on the
-// odroid runner could upload more artifacts into the run, but cannot post commit statuses.
+// production host's runner could upload more artifacts into the run, but cannot post commit statuses.
 test('only the GitHub-hosted build job can write the release-artifact status', () => {
   expect(workflow.jobs.build.permissions).toEqual({ contents: 'read', packages: 'write', statuses: 'write' });
   expect(workflow.jobs.deploy.permissions).toEqual({ actions: 'read', contents: 'read', statuses: 'read' });
@@ -142,10 +142,10 @@ describe('the build step that records the release artifact', () => {
   });
 });
 
-// Root on the odroid fetches and verifies the artifact itself; the runner neither downloads
+// Root on the Banana Pi fetches and verifies the artifact itself; the runner neither downloads
 // release files nor gets more than read access.
-test('deployment runs on the odroid runner through the root activation wrapper only', () => {
-  expect(workflow.jobs.deploy['runs-on']).toEqual(['self-hosted', 'odroid-hcb']);
+test('deployment runs on the Banana runner through the root activation wrapper only', () => {
+  expect(workflow.jobs.deploy['runs-on']).toEqual(['self-hosted', 'bananapi-hcb']);
   expect(workflow.jobs.deploy.steps.map((step) => step.uses).filter(Boolean)).toEqual([]);
   const text = JSON.stringify(workflow.jobs.deploy);
   expect(text).not.toMatch(/secrets\.SSH_|appleboy\/|download-artifact/);
@@ -160,7 +160,7 @@ test('hosted deployment never follows latest or changes unrelated shared service
 
 // A self-hosted runner executes whatever a job gives it on the production box, so no
 // workflow that a pull request can trigger may ever be scheduled onto it. The per-PR stage QA
-// (#840) reaches the odroid only through stage-qa.yml, triggered by `workflow_run`: it always runs
+// (#840) reaches the Banana Pi only through stage-qa.yml, triggered by `workflow_run`: it always runs
 // the default branch's copy, checks nothing out, and receives a SHA instead of code
 // (stage-qa-workflows.test.ts pins that).
 test('no pull-request-triggered workflow targets a self-hosted runner', () => {
@@ -181,7 +181,7 @@ test('no pull-request-triggered workflow targets a self-hosted runner', () => {
       expect({
         file,
         name,
-        selfHosted: labels.some((label) => label === 'self-hosted' || label.startsWith('odroid')),
+        selfHosted: labels.some((label) => label === 'self-hosted' || label.startsWith('bananapi')),
       }).toEqual({
         file,
         name,
@@ -218,7 +218,7 @@ function selfHostedStatusAccess(): { job: string; statuses: string }[] {
     const parsed = fileSchema.parse(Bun.YAML.parse(readFileSync(resolve(WORKFLOWS, file), 'utf8')));
     for (const [name, job] of Object.entries(parsed.jobs)) {
       const labels = [job['runs-on'] ?? []].flat();
-      if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
+      if (!labels.some((label) => label === 'self-hosted' || label.startsWith('bananapi'))) continue;
       const statuses = statusesAccess(job.permissions ?? parsed.permissions);
       statusAccess.push({ job: `${file}:${name}`, statuses });
     }
@@ -254,7 +254,7 @@ test('jobs on a self-hosted runner reference no secret but GITHUB_TOKEN', () => 
     const parsed = fileSchema.parse(Bun.YAML.parse(readFileSync(resolve(WORKFLOWS, file), 'utf8')));
     for (const [name, job] of Object.entries(parsed.jobs)) {
       const labels = [job['runs-on'] ?? []].flat();
-      if (!labels.some((label) => label === 'self-hosted' || label.startsWith('odroid'))) continue;
+      if (!labels.some((label) => label === 'self-hosted' || label.startsWith('bananapi'))) continue;
       // Workflow-level env reaches every job, so it counts as part of this one.
       const text = JSON.stringify([parsed.env ?? {}, job]);
       // `secrets.X`, `secrets['X']` and `secrets["X"]`, plus a bare `secrets` (toJSON(secrets)).
@@ -292,7 +292,7 @@ test('the success notification runs on a GitHub-hosted runner after the deploy',
   expect(failure.if).toContain("needs.deploy.result == 'failure'");
 });
 
-// The odroid is a shared multi-user box: any local user can read every process's argv in
+// The production host is a shared multi-user box: any local user can read every process's argv in
 // /proc/*/cmdline. The activate step hands root only the SHA as an argument; the token
 // travels on stdin, and nothing on the box ever carries it in an argument list.
 describe('the activate step on the self-hosted runner', () => {

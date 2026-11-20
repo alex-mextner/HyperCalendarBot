@@ -165,15 +165,15 @@ class SmokeTargetsOnlyTheStageBot(unittest.TestCase):
 
 PIDS_CAP = 512
 MEMORY_CAP_FORMS = {
-    "768m",
-    str(768 * 1024 * 1024),
+    "512m",
+    str(512 * 1024 * 1024),
 }  # Compose spells the same cap differently across versions
 OVERLAY_TEMPLATE = 'services:\n  bot-stage:\n    image: "{image}"\n'
 
 
 class TheStageComposeCarriesOneProcessCap(unittest.TestCase):
     def test_the_cap_is_not_spelled_as_pids_limit(self):
-        # Compose v5 (the odroid's) rejects pids_limit next to deploy.resources.limits ("can't set distinct
+        # Compose v5 rejects pids_limit next to deploy.resources.limits ("can't set distinct
         # values on 'pids_limit' and 'deploy.resources.limits.pids'"): every Stage QA run died at compose up (#885).
         self.assertNotRegex(STAGE_COMPOSE, r"(?m)^\s*pids_limit:")
         self.assertRegex(STAGE_COMPOSE, rf"(?m)^\s+pids:\s*{PIDS_CAP}\s*$")
@@ -397,7 +397,7 @@ class TheProductionDeployDoesNotDependOnTheStage(unittest.TestCase):
         runs_on = re.findall(r"^\s*runs-on:.*$", QA_WORKFLOW, re.MULTILINE)
         self.assertTrue(runs_on)
         for line in runs_on:
-            self.assertNotIn("odroid-hcb", line)
+            self.assertNotIn("bananapi-hcb", line)
         self.assertNotIn(f"qa-{RETIRED_RUNNER}", QA_WORKFLOW)
 
     def test_nothing_tracked_still_names_the_pc_runner(self):

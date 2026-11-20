@@ -2,7 +2,7 @@
 """Odroid driver of the per-PR stage QA (#840): `stage-qa-driver.py <sha40> [--config FILE]`, token on stdin line 1.
 
 It is the whole body of the `Stage QA run` job (workflow stage-qa.yml), which runs on the stage QA runner of
-the odroid. The runner user can run nothing as root except the stage wrapper, and nothing on the browser host
+the production host. The runner user can run nothing as root except the stage wrapper, and nothing on the browser host
 except one forced command; this driver ties the two together, in this order (the order is the point: the
 wrapper's watchdog starts when the wrapper takes the host deploy lock, so no wait for the browser host's lock
 may happen after it):
@@ -19,7 +19,7 @@ may happen after it):
   4. `DONE` to the wrapper: the stage is torn down, always (pass, fail, cancel, timeout, dropped connection);
   5. the last stdout line is `STAGE_QA_RESULT ...` and the exit code is the verdict.
 
-Why the browser is not on this host: the odroid runs production with a few hundred MB of memory to spare,
+Why the browser is not on this host: the production host runs the bots with a few hundred MB of memory to spare,
 and Telegram Web needs that much (runbook "Stage QA", "Why the browser runs on the server").
 
 Trust: the config is root-installed (scripts/install-stage-qa.sh), never taken from a PR. The GitHub token goes

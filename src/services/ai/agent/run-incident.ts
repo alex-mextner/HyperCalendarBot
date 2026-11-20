@@ -99,7 +99,7 @@ export function formatRunIncident(incident: RunIncident, suppressed: number): st
     ...(suppressed > 0
       ? [`suppressedSince: ${suppressed} earlier incident(s) of this class were not alerted in the last 10 minutes`]
       : []),
-    `Look the requestId up: \`docker logs hypercal-bot 2>&1 | grep ${incident.requestId}\` on root@odroidn2, and the per-chat debug log under logs/chats/ (grep its "REQUEST ID:" line).`,
+    `Look the requestId up: \`docker logs hypercal-bot 2>&1 | grep ${incident.requestId}\` on root@bananapi-m4, and the per-chat debug log under logs/chats/ (grep its "REQUEST ID:" line).`,
   ].join('\n');
 }
 

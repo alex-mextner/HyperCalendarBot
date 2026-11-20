@@ -67,7 +67,7 @@ class PostShipTests(unittest.TestCase):
             any(a[0] == "bash" or a[:3] == ["gh", "run", "list"] for a, k in fake.calls)
         )
 
-    def test_live_probe_defaults_to_the_odroid_production_host(self):
+    def test_live_probe_defaults_to_the_banana_production_host(self):
         fake = FakeCommands(self.root, already=True)
         environment = {k: v for k, v in os.environ.items() if k != "HYPERCAL_DEPLOY_HOST"}
         with unittest.mock.patch.dict(os.environ, environment, clear=True):
@@ -75,7 +75,7 @@ class PostShipTests(unittest.TestCase):
         hosts = [
             args[args.index("ConnectTimeout=10") + 1] for args, _ in fake.calls if args[0] == "ssh"
         ]
-        self.assertEqual(hosts, ["root@odroidn2"])
+        self.assertEqual(hosts, ["root@bananapi-m4"])
 
     def test_verified_fallback_uses_merged_blob_and_full_local_gate(self):
         for mode in ["none", "unavailable"]:

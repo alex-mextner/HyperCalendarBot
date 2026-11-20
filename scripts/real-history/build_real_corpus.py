@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the scrubbed real-history corpus. RUN ON THE ODROID ONLY (root@odroidn2): the raw text never leaves it.
+"""Builds the scrubbed real-history corpus. RUN ON THE PRODUCTION HOST ONLY (root@bananapi-m4): the raw text never leaves it.
 
   nice ionice -c3 python3 build_real_corpus.py --out DIR --private DIR [--vocab-jsonl FILE ...] [--audit]
 

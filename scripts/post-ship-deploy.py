@@ -309,7 +309,7 @@ def merged_target(repo, pr, sha, call):
 
 def deploy_destination():
     """(ssh host, install directory) from the environment; both end up in an ssh command line."""
-    host = os.environ.get("HYPERCAL_DEPLOY_HOST", "root@odroidn2")
+    host = os.environ.get("HYPERCAL_DEPLOY_HOST", "root@bananapi-m4")
     directory = os.environ.get("HYPERCAL_DEPLOY_PATH", "/opt/hypercal")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", host):
         raise DeploymentError("invalid deployment host")

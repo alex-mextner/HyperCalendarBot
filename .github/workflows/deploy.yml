@@ -52,7 +52,8 @@ jobs:
 
   build:
     needs: test
-    # Production runs on the home ODROID-N2+ (aarch64) since 2026-10-09 (#784): build the
+    # Production runs on the home Banana Pi BPI-M4 (`bananapi-m4`, aarch64) since 2026-11-20 (#1015;
+    # before that the ODROID-N2+, from 2026-10-09, #784): build the
     # arm64 image natively on GitHub's free arm runner instead of emulating it.
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -82,7 +83,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
-      # The odroid runner has no docker access and no registry credentials: root on the odroid
+      # The Banana runner has no docker access and no registry credentials: root on the Banana
       # fetches this artifact itself and loads only the checksummed docker-save archive in it.
       - name: Prepare exact release artifact
         env:
@@ -107,8 +108,8 @@ jobs:
           retention-days: 3
           # image.tar.gz is already gzip-compressed.
           compression-level: 0
-      # The deploy job runs on the shared odroid runner, where anything left behind could upload
-      # more release-<sha> artifacts into this run. Root on the odroid deploys only the artifact
+      # The deploy job runs on the shared Banana runner, where anything left behind could upload
+      # more release-<sha> artifacts into this run. Root on the Banana deploys only the artifact
       # this status names: posted from here, with a token the deploy job never gets.
       - name: Record the release artifact on the commit
         env:
@@ -131,10 +132,10 @@ jobs:
 
   deploy:
     needs: build
-    # Self-hosted runner on the odroid (user hcb-runner, no docker group). Only pushes to
+    # Self-hosted runner on the Banana Pi `bananapi-m4` (user hcb-runner, no docker group). Only pushes to
     # main reach it; no pull_request-triggered workflow may ever target this label.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, odroid-hcb]
+    runs-on: [self-hosted, bananapi-hcb]
     # A deploy may first WAIT up to 40 min for the other repository's deploy (host deploy lock, runbook
     # "Deploy reliability"), then load and swap: the job limit has to outlast both.
     timeout-minutes: 100
@@ -148,18 +149,18 @@ jobs:
     steps:
       - name: Mark the start of this deploy attempt
         run: touch "$RUNNER_TEMP/deploy-started"
-      # Root wrapper installed by hand on the odroid (runbook "Odroid runner"). It trusts only
+      # Root wrapper installed by hand on the Banana (runbook "Self-hosted runners"). It trusts only
       # the SHA: it checks main itself, deploys the artifact the build job's release-artifact
       # commit status names, verifies its digest and push-to-main run, and runs the staged
       # scripts/deploy-prebuilt-image.sh. The token goes on stdin (printf is a shell builtin),
-      # never into a process argument list, because every local user on the odroid can read those.
+      # never into a process argument list, because every local user on the Banana can read those.
       - name: Activate verified prebuilt release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ github.sha }}
         run: printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/hypercal-activate-release "$RELEASE_SHA"
       # Names the evidence directory the activator saved before a rollback, for the failure alert. Only
-      # the directory name is read (the odroid's logs dir lists for every local user; its content is root-only).
+      # the directory name is read (the Banana's logs dir lists for every local user; its content is root-only).
       - name: Locate failed-release evidence
         id: evidence
         if: failure()
@@ -170,7 +171,7 @@ jobs:
           dir="$(find /opt/hypercal/logs -maxdepth 1 -type d -name "failed-${RELEASE_SHA:0:12}-*" -newer "$RUNNER_TEMP/deploy-started" 2>/dev/null | sort | tail -n 1 || true)"
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
-  # Runs on a GitHub-hosted runner: the odroid jobs must see no secret but GITHUB_TOKEN, since
+  # Runs on a GitHub-hosted runner: the Banana jobs must see no secret but GITHUB_TOKEN, since
   # anything running there as hcb-runner can read a job's environment from /proc.
   notify-success:
     name: Notify on success
@@ -186,7 +187,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         # A GitHub-hosted runner is single-tenant, but the token still stays out of argv, as it
-        # did on the odroid. A failed notification only warns.
+        # did on the self-hosted runner. A failed notification only warns.
         run: |
           python3 - <<'PY'
           import json, os, urllib.request
@@ -234,7 +235,7 @@ jobs:
           TEXT=$(printf '🚨 <b>CI/CD failed</b> [%s]\n<code>%s</code> — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")
           # The activator saved the failed container's logs before rolling back (runbook, Deploy reliability).
           if [ -n "$FAILED_EVIDENCE" ]; then
-            TEXT+=$(printf '\nFailed-release evidence on the odroid: <code>%s</code>' "$FAILED_EVIDENCE")
+            TEXT+=$(printf '\nFailed-release evidence on bananapi-m4: <code>%s</code>' "$FAILED_EVIDENCE")
           fi
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \

@@ -2,17 +2,19 @@
 
 ## Server
 
-Since 2026-10-09 22:30 UTC (#784):
+Since 2026-11-20 (#1015; from 2026-10-09 22:30 UTC, #784, the ODROID-N2+ `root@odroidn2`):
 
-- **Host**: `root@odroidn2` — home ODROID-N2+ (Tailscale MagicDNS name), aarch64, Armbian trixie
+- **Host**: `root@bananapi-m4` — home Banana Pi BPI-M4 (Tailscale MagicDNS name), aarch64, Armbian 26.11
+  trixie, 1.7 GB usable RAM plus 864 MB zram swap, shared with the other bots and their runners
 - **Deploy path**: `/opt/hypercal`
-- **Docker image store**: containerd (Docker 29 on the odroid, shared with other projects). An image's
+- **Docker image store**: containerd (Docker 29 on the Banana). An image's
   `.Id` is its manifest digest there; the deploy compares that with the release archive's indexed manifest
   (deploy runbook, "Image identity").
-- **Domain**: hypercal.mextner.com — a proxied Cloudflare CNAME to the tunnel `odroid-home`, whose cloudflared
-  runs on the odroid and forwards the hostname to `http://localhost:3001` (the bot's published port). Since
-  2026-10-25 (#828); before that the name was hypercal.invntrm.ru on a DigitalOcean droplet
-  (`104.248.84.190`, tailnet node `do-edge`) whose Caddy proxied to the odroid over the tailnet, and before
+- **Domain**: hypercal.mextner.com — a proxied Cloudflare CNAME to the tunnel `bananapi-m4`, whose cloudflared
+  runs on the Banana and forwards the hostname to `http://localhost:3001` (the bot's published port). Since
+  2026-10-25 (#828), through the odroid's tunnel `odroid-home` until 2026-11-20; before that the name was
+  hypercal.invntrm.ru on a DigitalOcean droplet (`104.248.84.190`, tailnet node `do-edge`) whose Caddy proxied
+  to the odroid over the tailnet, and before
   2026-10-10 over the odroid's Tailscale Funnel (which failed that night from 00:00 to 03:10 UTC and is off).
   The old name stays up beside the new one only until the droplet is deleted.
   The external watchdog cron on the droplet was disabled 2026-10-10 to 2026-10-24 and re-enabled in #822 (runbook
@@ -24,9 +26,9 @@ Since 2026-10-09 22:30 UTC (#784):
 |-----------|-----|
 | Bot | Docker container (ghcr.io/alex-mextner/hypercalendarbot, linux/arm64, pinned by commit SHA) |
 | Redis | Docker container (redis:7-alpine, AOF persistence) |
-| Reverse proxy | Caddy on the DO droplet → the odroid's tailnet address |
+| Ingress | Cloudflare tunnel `bananapi-m4` (cloudflared on the host) → `localhost:3001` |
 | Orchestration | Docker Compose v2 plugin |
-| CI/CD | GitHub Actions → arm64 build on `ubuntu-24.04-arm` → GHCR + release artifact → self-hosted odroid runner → root activation wrapper |
+| CI/CD | GitHub Actions → arm64 build on `ubuntu-24.04-arm` → GHCR + release artifact → self-hosted runner `bananapi-hcb` → root activation wrapper |
 
 ## Initial Server Setup
 
@@ -36,8 +38,7 @@ One-time steps for a fresh server.
 
 Docker Engine with the Compose v2 plugin: `docker compose version` must work as root.
 
-Ingress is the DO droplet's Caddy, which reaches the odroid over the tailnet (section 4); the odroid runs
-no Caddy for this bot.
+Ingress is the Cloudflare tunnel (section 4); the host runs no Caddy for this bot.
 
 ### 2. Create deploy directory
 
@@ -67,7 +68,7 @@ Note: `REDIS_URL` and `NODE_ENV` are overridden by docker-compose.yml — values
 
 ### 4. DNS and ingress
 
-`hypercal.mextner.com` is a proxied CNAME in the `mextner.com` Cloudflare zone to the tunnel `odroid-home`
+`hypercal.mextner.com` is a proxied CNAME in the `mextner.com` Cloudflare zone to the tunnel `bananapi-m4`
 (`<tunnel-id>.cfargotunnel.com`). The tunnel is remotely managed: its ingress rules live in Cloudflare
 (Zero Trust > Networks > Tunnels, or `cf tunnels config get|update <tunnel-id>`), one rule per hostname, and
 the rule `hypercal.mextner.com` -> `http://localhost:3001` sends everything to the bot, which answers only
@@ -76,8 +77,8 @@ DigitalOcean ingress for the old name and has no part in this path.
 
 ### 5. Deploy runner
 
-No SSH secrets. The `deploy` job runs on the self-hosted runner `odroid-hcb` on the odroid; its setup
-(user, labels, sudoers line, activation wrapper) is in `docs/reference/deploy-runbook.md`, "Odroid runner".
+No SSH secrets. The `deploy` job runs on the self-hosted runner `bananapi-hcb` on the Banana; its setup
+(user, labels, sudoers line, activation wrapper) is in `docs/reference/deploy-runbook.md`, "Self-hosted runners".
 
 ### 6. Telegram MTProto (optional)
 
@@ -127,7 +128,7 @@ On every push to `main` (`.github/workflows/deploy.yml`):
 1. **test** — `bun test`, lint, typecheck (ubuntu-latest)
 2. **build** — linux/arm64 image → push to ghcr.io; `docker save` release artifact + checksums, and a
    `release-artifact` commit status that names the uploaded artifact's id and digest (ubuntu-24.04-arm)
-3. **deploy** — the odroid runner pipes its token to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>`.
+3. **deploy** — the Banana runner `bananapi-hcb` pipes its token to `sudo -n /usr/local/sbin/hypercal-activate-release <sha>`.
    As root, the wrapper checks that main still points at the commit, then downloads and digest-checks the
    artifact that status names, after checking it came from the push-to-main run. Then it runs the staged
    `scripts/deploy-prebuilt-image.sh` (checksum, identity, schema gate, backup, rollback)
@@ -135,23 +136,23 @@ On every push to `main` (`.github/workflows/deploy.yml`):
 ## Manual Deploy
 
 `scripts/deploy-local-fallback.sh` builds the exact `origin/main` commit locally as linux/arm64 and runs
-the same activator on `root@odroidn2`; see the deploy runbook, "Local deploy fallback".
+the same activator on `root@bananapi-m4`; see the deploy runbook, "Local deploy fallback".
 
 ## Monitoring
 
 ```bash
 # Logs
-ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f bot'
-ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml logs -f redis'
+ssh root@bananapi-m4 'docker compose -f /opt/hypercal/docker-compose.yml logs -f bot'
+ssh root@bananapi-m4 'docker compose -f /opt/hypercal/docker-compose.yml logs -f redis'
 
 # Health check
 curl https://hypercal.mextner.com/health
 
 # Container status
-ssh root@odroidn2 'docker compose -f /opt/hypercal/docker-compose.yml ps'
+ssh root@bananapi-m4 'docker compose -f /opt/hypercal/docker-compose.yml ps'
 
 # Tunnel client (ingress)
-ssh root@odroidn2 'journalctl -u cloudflared -n 50 --no-pager'
+ssh root@bananapi-m4 'systemctl status compose@cloudflared.service --no-pager; docker compose --project-directory /srv/compose/cloudflared logs --tail 50'
 ```
 
 ## Resource Limits
@@ -160,7 +161,7 @@ Configured in docker-compose.yml:
 
 | Service | Memory | CPU |
 |---------|--------|-----|
-| bot | 1 GB | 1.5 cores |
+| bot | 768 MB (256 MB reserved) | 1.5 cores |
 | redis | 256 MB | 0.5 cores |
 
 ## Redis Persistence

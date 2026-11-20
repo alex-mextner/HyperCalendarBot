@@ -1016,7 +1016,7 @@ function incidentText(
     'provider: modelCalls=4 attempts=5 fallbacks=1',
     `validator: ${overrides.validator ?? 'unavailable(timeout)'}`,
     'delivery: fallback',
-    `Look the requestId up: \`docker logs hypercal-bot 2>&1 | grep ${requestId}\` on root@odroidn2, and the per-chat debug log under logs/chats/.`,
+    `Look the requestId up: \`docker logs hypercal-bot 2>&1 | grep ${requestId}\` on root@bananapi-m4, and the per-chat debug log under logs/chats/.`,
   ].join('\n');
 }
 
