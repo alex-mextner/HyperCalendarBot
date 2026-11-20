@@ -1,6 +1,8 @@
+# Host dependencies use uv pip compile/sync and the universal requirements.lock.
+# Commands and the ntgcalls patch procedure: docs/reference/python-dependencies.md.
 [project]
 name = "hypercalendarbot"
-version = "0.3.6"
+version = "0.3.7"
 requires-python = ">=3.12"
 dependencies = [
     "pyrofork>=2.3",

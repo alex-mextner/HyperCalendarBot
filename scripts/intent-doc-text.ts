@@ -17,20 +17,10 @@ const HTML_ESCAPES: { [char: string]: string } = {
 export const escapeHtml = (value: unknown): string =>
   String(value ?? '—').replace(/[&<>"']/g, (char) => HTML_ESCAPES[char]!);
 
-const MARKDOWN_ESCAPES: { [char: string]: string } = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  ...Object.fromEntries([...'[]()`|*_\\~!#'].map((char) => [char, `&#${char.charCodeAt(0)};`])),
-};
-
-/**
- * Text for Markdown: markup characters and Markdown controls written as entities, in a single pass so an inserted
- * entity is never rescanned. Quotes stay literal: they are inert in Markdown text, and `what's` stays readable raw.
- */
+/** Text for Markdown: HTML-escaped, with every Markdown control character written as an entity. */
 export const escapeMarkdown = (value: unknown): string =>
-  String(value ?? '—')
-    .replace(/[&<>[\]()`|*_\\~!#]/g, (char) => MARKDOWN_ESCAPES[char]!)
+  escapeHtml(value)
+    .replace(/[[\]()`|*_\\~!#]/g, (char) => `&#${char.charCodeAt(0)};`)
     .replace(/\r?\n/g, '<br>');
 
 /** Physical lines of a text file as the size gate counts them: a trailing newline does not add one. */

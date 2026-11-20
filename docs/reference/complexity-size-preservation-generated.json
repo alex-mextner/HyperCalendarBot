@@ -1,0 +1,4641 @@
+{
+  "schema": "gh860-preservation/generated/v2",
+  "baseline_sha": "2327f650f56b09fbb1362891349411af59d1562d",
+  "candidate_base_sha": "bb7a9d4765e406b3c2c258fc4ad55445643857ac",
+  "generated": {
+    "baseline_sha": "2327f650f56b09fbb1362891349411af59d1562d",
+    "artifact_sha256": "f8262e0e9b56d385d43e34028de72ca3e15dd2220f942daefab2716de6dada56",
+    "source_input_manifest_sha256": "143309f13514455320cf65538d12b46929233183905dd4201e9d55d253b884bd",
+    "renderer_sources_sha256": {
+      "scripts/generate-intent-docs.ts": "11c6de399676c7e6708307ea480704c135c5f14ed2424028de6dfef4279b8786",
+      "scripts/intent-doc-assets.ts": "ff1794c058f5c42b66753ddd3912c7f08b2e13aad0d0d3965addb62dff24134c",
+      "scripts/intent-doc-html.ts": "ec4a81e693b505e082ff4585ece9351d0052c455aeb917f7a0645ca872592b8c",
+      "scripts/intent-doc-markdown.ts": "ff42cab0e39ede9919e7e3e3e53aeea1f548af2b656b4ab50c70ced1973e9767",
+      "scripts/intent-doc-text.ts": "cc634fab812612e99e3aa76d474e904f15ab06b3dd56303d2f38a3679fc54cb4",
+      "scripts/intent-doc-workflows.ts": "6936f9d89c0ac6b29c892e006160a439533059656f04c7e4b1ce506556b2b02f",
+      "scripts/verify-intent-docs.ts": "54bb4322a8beb581076cc9e528f9cd6bf87a6a24d7aaa15e017787e280982052",
+      "test/services/intent/ssg-catalogue.test.ts": "4009d5b30dbd0d49fc6e1fdfa15516d453eb53436181a47eb987539ce31b8fd3",
+      "test/services/intent/ssg-layout.test.ts": "c1db7cf329d0cf0d881067fff8bcba41525cc39ce706f1c236c326997c81e135"
+    },
+    "original_public_outputs_exact": {
+      "README.md": "be93115ada88533fb43a61c9a25f35fa778dc062bc151ecda8650621c1196aea",
+      "index.html": "3a0421486e1a97d85bbd26096be215784d63a08b914f54525ce6ace59f6cce51"
+    },
+    "readme_explicit_retargets": [
+      {
+        "old": "(#basis.calendar.day)",
+        "new": "(rules/calendar.md#basis.calendar.day)",
+        "occurrences": 5
+      },
+      {
+        "old": "(#basis.calendar.period)",
+        "new": "(rules/calendar.md#basis.calendar.period)",
+        "occurrences": 5
+      },
+      {
+        "old": "(#basis.calendar.upcoming)",
+        "new": "(rules/calendar.md#basis.calendar.upcoming)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.calendar.search)",
+        "new": "(rules/calendar.md#basis.calendar.search)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.calendar.count)",
+        "new": "(rules/calendar.md#basis.calendar.count)",
+        "occurrences": 4
+      },
+      {
+        "old": "(#basis.calendar.image)",
+        "new": "(rules/calendar.md#basis.calendar.image)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.holidays.upcoming)",
+        "new": "(rules/calendar.md#basis.holidays.upcoming)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.slots.day)",
+        "new": "(rules/slots.md#basis.slots.day)",
+        "occurrences": 4
+      },
+      {
+        "old": "(#basis.slots.week)",
+        "new": "(rules/slots.md#basis.slots.week)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.slots.check_time)",
+        "new": "(rules/slots.md#basis.slots.check_time)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.event.create)",
+        "new": "(rules/events-1.md#basis.event.create)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.event.show)",
+        "new": "(rules/events-1.md#basis.event.show)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.event.reschedule)",
+        "new": "(rules/events-1.md#basis.event.reschedule)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.event.rename)",
+        "new": "(rules/events-1.md#basis.event.rename)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.event.set_detail)",
+        "new": "(rules/events-1.md#basis.event.set_detail)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.event.delete)",
+        "new": "(rules/events-1.md#basis.event.delete)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.event.snooze)",
+        "new": "(rules/events-2.md#basis.event.snooze)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.event.hide)",
+        "new": "(rules/events-2.md#basis.event.hide)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.event.create_range)",
+        "new": "(rules/events-2.md#basis.event.create_range)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.reminder.set)",
+        "new": "(rules/reminders.md#basis.reminder.set)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.reminder.list)",
+        "new": "(rules/reminders.md#basis.reminder.list)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.reminder.clear)",
+        "new": "(rules/reminders.md#basis.reminder.clear)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.reminder.after)",
+        "new": "(rules/reminders.md#basis.reminder.after)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.invite.send)",
+        "new": "(rules/invitations.md#basis.invite.send)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.invite.status)",
+        "new": "(rules/invitations.md#basis.invite.status)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.contacts.list)",
+        "new": "(rules/contacts.md#basis.contacts.list)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.contacts.find)",
+        "new": "(rules/contacts.md#basis.contacts.find)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.contacts.add)",
+        "new": "(rules/contacts.md#basis.contacts.add)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.contacts.rename)",
+        "new": "(rules/contacts.md#basis.contacts.rename)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.contacts.set_username)",
+        "new": "(rules/contacts.md#basis.contacts.set_username)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.contacts.delete)",
+        "new": "(rules/contacts.md#basis.contacts.delete)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.call.start)",
+        "new": "(rules/contacts.md#basis.call.start)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.settings.view)",
+        "new": "(rules/settings.md#basis.settings.view)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.settings.toggle)",
+        "new": "(rules/settings.md#basis.settings.toggle)",
+        "occurrences": 9
+      },
+      {
+        "old": "(#basis.settings.agenda_time)",
+        "new": "(rules/settings.md#basis.settings.agenda_time)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.settings.duration)",
+        "new": "(rules/settings.md#basis.settings.duration)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.settings.language)",
+        "new": "(rules/settings.md#basis.settings.language)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.settings.timezone)",
+        "new": "(rules/settings.md#basis.settings.timezone)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.history.search)",
+        "new": "(rules/history.md#basis.history.search)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.actionlog.recent)",
+        "new": "(rules/history.md#basis.actionlog.recent)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.memory.remember)",
+        "new": "(rules/memory.md#basis.memory.remember)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.time.now)",
+        "new": "(rules/utility.md#basis.time.now)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.time.convert)",
+        "new": "(rules/utility.md#basis.time.convert)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.calc.evaluate)",
+        "new": "(rules/utility.md#basis.calc.evaluate)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.google.status)",
+        "new": "(rules/google.md#basis.google.status)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.google.calendars)",
+        "new": "(rules/google.md#basis.google.calendars)",
+        "occurrences": 2
+      },
+      {
+        "old": "(#basis.google.connect_help)",
+        "new": "(rules/google.md#basis.google.connect_help)",
+        "occurrences": 4
+      },
+      {
+        "old": "(#basis.telegram.status)",
+        "new": "(rules/google.md#basis.telegram.status)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.secretary.list)",
+        "new": "(rules/secretary.md#basis.secretary.list)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.secretary.invite)",
+        "new": "(rules/secretary.md#basis.secretary.invite)",
+        "occurrences": 3
+      },
+      {
+        "old": "(#basis.secretary.clarify)",
+        "new": "(rules/secretary.md#basis.secretary.clarify)",
+        "occurrences": 1
+      },
+      {
+        "old": "(#basis.bot.info)",
+        "new": "(rules/bot.md#basis.bot.info)",
+        "occurrences": 4
+      }
+    ],
+    "markdown_cards": [
+      {
+        "name": "basis.calendar.day",
+        "original": {
+          "first_line": 111,
+          "last_line": 195,
+          "first_byte": 15803,
+          "end_byte": 20245,
+          "bytes": 4442,
+          "sha256": "cddaafb0576f83d7f3c00b970c5c1837672190a4883a9f03c3610a9650336f8a"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 93,
+          "first_byte": 455,
+          "end_byte": 4897,
+          "bytes": 4442,
+          "sha256": "cddaafb0576f83d7f3c00b970c5c1837672190a4883a9f03c3610a9650336f8a"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calendar.period",
+        "original": {
+          "first_line": 199,
+          "last_line": 293,
+          "first_byte": 20252,
+          "end_byte": 25260,
+          "bytes": 5008,
+          "sha256": "f84ddc62ca7f03ce1155d1211451fc926edee7b4d40ec04bef3b9afa0dce94d5"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 97,
+          "last_line": 191,
+          "first_byte": 4904,
+          "end_byte": 9912,
+          "bytes": 5008,
+          "sha256": "f84ddc62ca7f03ce1155d1211451fc926edee7b4d40ec04bef3b9afa0dce94d5"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calendar.upcoming",
+        "original": {
+          "first_line": 297,
+          "last_line": 369,
+          "first_byte": 25267,
+          "end_byte": 27934,
+          "bytes": 2667,
+          "sha256": "629779b04280567ce030e36262b58e58bff268fca154ff6d3ddbf8efa2ab6178"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 195,
+          "last_line": 267,
+          "first_byte": 9919,
+          "end_byte": 12586,
+          "bytes": 2667,
+          "sha256": "629779b04280567ce030e36262b58e58bff268fca154ff6d3ddbf8efa2ab6178"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calendar.search",
+        "original": {
+          "first_line": 373,
+          "last_line": 437,
+          "first_byte": 27941,
+          "end_byte": 30291,
+          "bytes": 2350,
+          "sha256": "2e382ca468d5d1c8c34047d95685b05daf2ff5bb971416a9997632b0682afd1f"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 271,
+          "last_line": 335,
+          "first_byte": 12593,
+          "end_byte": 14943,
+          "bytes": 2350,
+          "sha256": "2e382ca468d5d1c8c34047d95685b05daf2ff5bb971416a9997632b0682afd1f"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calendar.count",
+        "original": {
+          "first_line": 441,
+          "last_line": 542,
+          "first_byte": 30298,
+          "end_byte": 34878,
+          "bytes": 4580,
+          "sha256": "4fc6b18b130ebc94cc3ef5d17cbf5a923801f35b2f2511d568f076d26e6d4df2"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 339,
+          "last_line": 440,
+          "first_byte": 14950,
+          "end_byte": 19530,
+          "bytes": 4580,
+          "sha256": "4fc6b18b130ebc94cc3ef5d17cbf5a923801f35b2f2511d568f076d26e6d4df2"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calendar.image",
+        "original": {
+          "first_line": 546,
+          "last_line": 657,
+          "first_byte": 34885,
+          "end_byte": 41409,
+          "bytes": 6524,
+          "sha256": "0a93eb90aa84619f258013750deffbce0f0f208d4a03c4aab2485fa0c23717aa"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 444,
+          "last_line": 555,
+          "first_byte": 19537,
+          "end_byte": 26061,
+          "bytes": 6524,
+          "sha256": "0a93eb90aa84619f258013750deffbce0f0f208d4a03c4aab2485fa0c23717aa"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.holidays.upcoming",
+        "original": {
+          "first_line": 661,
+          "last_line": 730,
+          "first_byte": 41416,
+          "end_byte": 44126,
+          "bytes": 2710,
+          "sha256": "67fd0001678e8d7b2a9074c54618864c25369edd64ca71b26d87fead263317fa"
+        },
+        "path": "docs/intents/rules/calendar.md",
+        "destination": {
+          "first_line": 559,
+          "last_line": 628,
+          "first_byte": 26068,
+          "end_byte": 28778,
+          "bytes": 2710,
+          "sha256": "67fd0001678e8d7b2a9074c54618864c25369edd64ca71b26d87fead263317fa"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.slots.day",
+        "original": {
+          "first_line": 734,
+          "last_line": 810,
+          "first_byte": 44162,
+          "end_byte": 47909,
+          "bytes": 3747,
+          "sha256": "b75df0fd6ffdb41933640dd68f01b685451308a5e14338a34dec94a593a6287e"
+        },
+        "path": "docs/intents/rules/slots.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 85,
+          "first_byte": 525,
+          "end_byte": 4272,
+          "bytes": 3747,
+          "sha256": "b75df0fd6ffdb41933640dd68f01b685451308a5e14338a34dec94a593a6287e"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.slots.week",
+        "original": {
+          "first_line": 814,
+          "last_line": 952,
+          "first_byte": 47916,
+          "end_byte": 54865,
+          "bytes": 6949,
+          "sha256": "d385ea502864941354963030603cb063b8a2606aa4695a67c5bdac86b8693a6d"
+        },
+        "path": "docs/intents/rules/slots.md",
+        "destination": {
+          "first_line": 89,
+          "last_line": 227,
+          "first_byte": 4279,
+          "end_byte": 11228,
+          "bytes": 6949,
+          "sha256": "d385ea502864941354963030603cb063b8a2606aa4695a67c5bdac86b8693a6d"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.slots.check_time",
+        "original": {
+          "first_line": 956,
+          "last_line": 1067,
+          "first_byte": 54872,
+          "end_byte": 60324,
+          "bytes": 5452,
+          "sha256": "b33f7e6ddb58c5fde8e32d46f02f046d56b660c07705282e97dd06c451b5b588"
+        },
+        "path": "docs/intents/rules/slots.md",
+        "destination": {
+          "first_line": 231,
+          "last_line": 342,
+          "first_byte": 11235,
+          "end_byte": 16687,
+          "bytes": 5452,
+          "sha256": "b33f7e6ddb58c5fde8e32d46f02f046d56b660c07705282e97dd06c451b5b588"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.create",
+        "original": {
+          "first_line": 1071,
+          "last_line": 1233,
+          "first_byte": 60345,
+          "end_byte": 68459,
+          "bytes": 8114,
+          "sha256": "253bcee476bff9c13ae4e1326ae7c0e8e5bbfc5baa5340f533f72725decfb4f9"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 171,
+          "first_byte": 516,
+          "end_byte": 8630,
+          "bytes": 8114,
+          "sha256": "253bcee476bff9c13ae4e1326ae7c0e8e5bbfc5baa5340f533f72725decfb4f9"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.show",
+        "original": {
+          "first_line": 1237,
+          "last_line": 1346,
+          "first_byte": 68466,
+          "end_byte": 73251,
+          "bytes": 4785,
+          "sha256": "dbbce874440f9eb8ee40b280e97265f06f08443ec404826d23c69daab942e95b"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 175,
+          "last_line": 284,
+          "first_byte": 8637,
+          "end_byte": 13422,
+          "bytes": 4785,
+          "sha256": "dbbce874440f9eb8ee40b280e97265f06f08443ec404826d23c69daab942e95b"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.reschedule",
+        "original": {
+          "first_line": 1350,
+          "last_line": 1539,
+          "first_byte": 73258,
+          "end_byte": 83635,
+          "bytes": 10377,
+          "sha256": "b237312b2e76fee0314c1f2f1d7469dfe120c57ead22a6c548f1a9bdbe4f4b36"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 288,
+          "last_line": 477,
+          "first_byte": 13429,
+          "end_byte": 23806,
+          "bytes": 10377,
+          "sha256": "b237312b2e76fee0314c1f2f1d7469dfe120c57ead22a6c548f1a9bdbe4f4b36"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.rename",
+        "original": {
+          "first_line": 1543,
+          "last_line": 1695,
+          "first_byte": 83642,
+          "end_byte": 90662,
+          "bytes": 7020,
+          "sha256": "8cc2eeb6302836ac37ada8a5f9dc321e313705fe20b3e6baf31596c6368b66fa"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 481,
+          "last_line": 633,
+          "first_byte": 23813,
+          "end_byte": 30833,
+          "bytes": 7020,
+          "sha256": "8cc2eeb6302836ac37ada8a5f9dc321e313705fe20b3e6baf31596c6368b66fa"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.set_detail",
+        "original": {
+          "first_line": 1699,
+          "last_line": 1874,
+          "first_byte": 90669,
+          "end_byte": 99340,
+          "bytes": 8671,
+          "sha256": "50b830ac397667d0effca5a37d5375304baeb1dae793feb81277554b40fe9ec7"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 637,
+          "last_line": 812,
+          "first_byte": 30840,
+          "end_byte": 39511,
+          "bytes": 8671,
+          "sha256": "50b830ac397667d0effca5a37d5375304baeb1dae793feb81277554b40fe9ec7"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.delete",
+        "original": {
+          "first_line": 1878,
+          "last_line": 2033,
+          "first_byte": 99347,
+          "end_byte": 106399,
+          "bytes": 7052,
+          "sha256": "1dd05229322a7dc9c45acf3ef60c02da3dda20f6199106969573ee2f33a7581d"
+        },
+        "path": "docs/intents/rules/events-1.md",
+        "destination": {
+          "first_line": 816,
+          "last_line": 971,
+          "first_byte": 39518,
+          "end_byte": 46570,
+          "bytes": 7052,
+          "sha256": "1dd05229322a7dc9c45acf3ef60c02da3dda20f6199106969573ee2f33a7581d"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.snooze",
+        "original": {
+          "first_line": 2037,
+          "last_line": 2217,
+          "first_byte": 106406,
+          "end_byte": 114609,
+          "bytes": 8203,
+          "sha256": "aec47a0150b76d012108f5d617e1a92f6775de17e4540947812fd278c9938464"
+        },
+        "path": "docs/intents/rules/events-2.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 189,
+          "first_byte": 542,
+          "end_byte": 8745,
+          "bytes": 8203,
+          "sha256": "aec47a0150b76d012108f5d617e1a92f6775de17e4540947812fd278c9938464"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.hide",
+        "original": {
+          "first_line": 2221,
+          "last_line": 2380,
+          "first_byte": 114616,
+          "end_byte": 122197,
+          "bytes": 7581,
+          "sha256": "8418e56e6a95043df8510db0aa052d4bf985849452c69ca66a8067b48da3760d"
+        },
+        "path": "docs/intents/rules/events-2.md",
+        "destination": {
+          "first_line": 193,
+          "last_line": 352,
+          "first_byte": 8752,
+          "end_byte": 16333,
+          "bytes": 7581,
+          "sha256": "8418e56e6a95043df8510db0aa052d4bf985849452c69ca66a8067b48da3760d"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.event.create_range",
+        "original": {
+          "first_line": 2384,
+          "last_line": 2524,
+          "first_byte": 122204,
+          "end_byte": 128993,
+          "bytes": 6789,
+          "sha256": "9618e224fb9a9467e00539a52c50f5b0b4a794fd7fb92a1961475efac9882c14"
+        },
+        "path": "docs/intents/rules/events-2.md",
+        "destination": {
+          "first_line": 356,
+          "last_line": 496,
+          "first_byte": 16340,
+          "end_byte": 23129,
+          "bytes": 6789,
+          "sha256": "9618e224fb9a9467e00539a52c50f5b0b4a794fd7fb92a1961475efac9882c14"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.reminder.set",
+        "original": {
+          "first_line": 2528,
+          "last_line": 2712,
+          "first_byte": 129022,
+          "end_byte": 137750,
+          "bytes": 8728,
+          "sha256": "7cebee35f9ab346c6f3837be86ce630f1244ee1fb6337e82dd5124dd22538bfe"
+        },
+        "path": "docs/intents/rules/reminders.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 193,
+          "first_byte": 523,
+          "end_byte": 9251,
+          "bytes": 8728,
+          "sha256": "7cebee35f9ab346c6f3837be86ce630f1244ee1fb6337e82dd5124dd22538bfe"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.reminder.list",
+        "original": {
+          "first_line": 2716,
+          "last_line": 2834,
+          "first_byte": 137757,
+          "end_byte": 143250,
+          "bytes": 5493,
+          "sha256": "4d4e184d243cf812d9d150a45c601983dcef6f5eb82c512d1c62bc714431ae8e"
+        },
+        "path": "docs/intents/rules/reminders.md",
+        "destination": {
+          "first_line": 197,
+          "last_line": 315,
+          "first_byte": 9258,
+          "end_byte": 14751,
+          "bytes": 5493,
+          "sha256": "4d4e184d243cf812d9d150a45c601983dcef6f5eb82c512d1c62bc714431ae8e"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.reminder.clear",
+        "original": {
+          "first_line": 2838,
+          "last_line": 2987,
+          "first_byte": 143257,
+          "end_byte": 150324,
+          "bytes": 7067,
+          "sha256": "1543afd12f1a01664cbc52f58cbfcdd24cf926dc3ab369d258a6e69564be863f"
+        },
+        "path": "docs/intents/rules/reminders.md",
+        "destination": {
+          "first_line": 319,
+          "last_line": 468,
+          "first_byte": 14758,
+          "end_byte": 21825,
+          "bytes": 7067,
+          "sha256": "1543afd12f1a01664cbc52f58cbfcdd24cf926dc3ab369d258a6e69564be863f"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.reminder.after",
+        "original": {
+          "first_line": 2991,
+          "last_line": 3123,
+          "first_byte": 150331,
+          "end_byte": 156116,
+          "bytes": 5785,
+          "sha256": "0853f954660e040ff053b8de71118af5a8c332242243a1d112bb43869c0bf562"
+        },
+        "path": "docs/intents/rules/reminders.md",
+        "destination": {
+          "first_line": 472,
+          "last_line": 604,
+          "first_byte": 21832,
+          "end_byte": 27617,
+          "bytes": 5785,
+          "sha256": "0853f954660e040ff053b8de71118af5a8c332242243a1d112bb43869c0bf562"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.invite.send",
+        "original": {
+          "first_line": 3127,
+          "last_line": 3301,
+          "first_byte": 156145,
+          "end_byte": 164749,
+          "bytes": 8604,
+          "sha256": "6175ba25f5d8f37faa36846fe639d050b6450f0126147ae82fff8d6876d2d0b2"
+        },
+        "path": "docs/intents/rules/invitations.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 183,
+          "first_byte": 493,
+          "end_byte": 9097,
+          "bytes": 8604,
+          "sha256": "6175ba25f5d8f37faa36846fe639d050b6450f0126147ae82fff8d6876d2d0b2"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.invite.status",
+        "original": {
+          "first_line": 3305,
+          "last_line": 3426,
+          "first_byte": 164756,
+          "end_byte": 170564,
+          "bytes": 5808,
+          "sha256": "371d474c0370b952781b1ecec0891c2007555253d5e742545a187c65b2f2decc"
+        },
+        "path": "docs/intents/rules/invitations.md",
+        "destination": {
+          "first_line": 187,
+          "last_line": 308,
+          "first_byte": 9104,
+          "end_byte": 14912,
+          "bytes": 5808,
+          "sha256": "371d474c0370b952781b1ecec0891c2007555253d5e742545a187c65b2f2decc"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.list",
+        "original": {
+          "first_line": 3430,
+          "last_line": 3491,
+          "first_byte": 170587,
+          "end_byte": 173018,
+          "bytes": 2431,
+          "sha256": "6a3092052d9dfe39d0c047b8bb2be0d4856eca12b78d63ccd7acb8406f35d121"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 70,
+          "first_byte": 491,
+          "end_byte": 2922,
+          "bytes": 2431,
+          "sha256": "6a3092052d9dfe39d0c047b8bb2be0d4856eca12b78d63ccd7acb8406f35d121"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.find",
+        "original": {
+          "first_line": 3495,
+          "last_line": 3565,
+          "first_byte": 173025,
+          "end_byte": 175481,
+          "bytes": 2456,
+          "sha256": "e67b705feb6900086e628d3a93eca11e38957831fdef8de813a537f4189e0f6d"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 74,
+          "last_line": 144,
+          "first_byte": 2929,
+          "end_byte": 5385,
+          "bytes": 2456,
+          "sha256": "e67b705feb6900086e628d3a93eca11e38957831fdef8de813a537f4189e0f6d"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.add",
+        "original": {
+          "first_line": 3569,
+          "last_line": 3659,
+          "first_byte": 175488,
+          "end_byte": 179075,
+          "bytes": 3587,
+          "sha256": "01d6cc4870c2ee3d5c3fc0d45c5f25f5218a94c48d4651f47ae7706ffee30581"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 148,
+          "last_line": 238,
+          "first_byte": 5392,
+          "end_byte": 8979,
+          "bytes": 3587,
+          "sha256": "01d6cc4870c2ee3d5c3fc0d45c5f25f5218a94c48d4651f47ae7706ffee30581"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.rename",
+        "original": {
+          "first_line": 3663,
+          "last_line": 3779,
+          "first_byte": 179082,
+          "end_byte": 184041,
+          "bytes": 4959,
+          "sha256": "1110f2557bf621cfeebd6dee2a367f4cdc79d4e1836170a575ddd5108811f8f5"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 242,
+          "last_line": 358,
+          "first_byte": 8986,
+          "end_byte": 13945,
+          "bytes": 4959,
+          "sha256": "1110f2557bf621cfeebd6dee2a367f4cdc79d4e1836170a575ddd5108811f8f5"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.set_username",
+        "original": {
+          "first_line": 3783,
+          "last_line": 3897,
+          "first_byte": 184048,
+          "end_byte": 189069,
+          "bytes": 5021,
+          "sha256": "b85db16966c9d35fdbd077307158033b84280486f1b9aa74b2f97ad325921694"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 362,
+          "last_line": 476,
+          "first_byte": 13952,
+          "end_byte": 18973,
+          "bytes": 5021,
+          "sha256": "b85db16966c9d35fdbd077307158033b84280486f1b9aa74b2f97ad325921694"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.contacts.delete",
+        "original": {
+          "first_line": 3901,
+          "last_line": 4011,
+          "first_byte": 189076,
+          "end_byte": 193812,
+          "bytes": 4736,
+          "sha256": "b578300ca7ea262db863308ab4cde1675c8be7bc6e335f913903f3b845b2ee37"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 480,
+          "last_line": 590,
+          "first_byte": 18980,
+          "end_byte": 23716,
+          "bytes": 4736,
+          "sha256": "b578300ca7ea262db863308ab4cde1675c8be7bc6e335f913903f3b845b2ee37"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.call.start",
+        "original": {
+          "first_line": 4015,
+          "last_line": 4100,
+          "first_byte": 193819,
+          "end_byte": 197443,
+          "bytes": 3624,
+          "sha256": "b8a0175f2cf353e4225849899621e23dd3d8faed888141a6a556a79c2d92c689"
+        },
+        "path": "docs/intents/rules/contacts.md",
+        "destination": {
+          "first_line": 594,
+          "last_line": 679,
+          "first_byte": 23723,
+          "end_byte": 27347,
+          "bytes": 3624,
+          "sha256": "b8a0175f2cf353e4225849899621e23dd3d8faed888141a6a556a79c2d92c689"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.view",
+        "original": {
+          "first_line": 4104,
+          "last_line": 4196,
+          "first_byte": 197468,
+          "end_byte": 201178,
+          "bytes": 3710,
+          "sha256": "7b0f62a52325411f4f48a26dcdecab693c7c7e299f87661a7a631693f14b6832"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 101,
+          "first_byte": 495,
+          "end_byte": 4205,
+          "bytes": 3710,
+          "sha256": "7b0f62a52325411f4f48a26dcdecab693c7c7e299f87661a7a631693f14b6832"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.toggle",
+        "original": {
+          "first_line": 4200,
+          "last_line": 4345,
+          "first_byte": 201185,
+          "end_byte": 208113,
+          "bytes": 6928,
+          "sha256": "cbf7479d1feae5d696deff5558a005db7a0a29d1c6b15cd862023dbbbc5f48a5"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 105,
+          "last_line": 250,
+          "first_byte": 4212,
+          "end_byte": 11140,
+          "bytes": 6928,
+          "sha256": "cbf7479d1feae5d696deff5558a005db7a0a29d1c6b15cd862023dbbbc5f48a5"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.agenda_time",
+        "original": {
+          "first_line": 4349,
+          "last_line": 4451,
+          "first_byte": 208120,
+          "end_byte": 212415,
+          "bytes": 4295,
+          "sha256": "bec1fdd4baae69c01343cb1e6d47aa65a6d3c5a78911b4b8ba793bed102787d7"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 254,
+          "last_line": 356,
+          "first_byte": 11147,
+          "end_byte": 15442,
+          "bytes": 4295,
+          "sha256": "bec1fdd4baae69c01343cb1e6d47aa65a6d3c5a78911b4b8ba793bed102787d7"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.duration",
+        "original": {
+          "first_line": 4455,
+          "last_line": 4555,
+          "first_byte": 212422,
+          "end_byte": 217012,
+          "bytes": 4590,
+          "sha256": "279c3fa8f62c490172cb94d69989047e46332b59de8c8e808620dc6b1b0988a2"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 360,
+          "last_line": 460,
+          "first_byte": 15449,
+          "end_byte": 20039,
+          "bytes": 4590,
+          "sha256": "279c3fa8f62c490172cb94d69989047e46332b59de8c8e808620dc6b1b0988a2"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.language",
+        "original": {
+          "first_line": 4559,
+          "last_line": 4656,
+          "first_byte": 217019,
+          "end_byte": 220551,
+          "bytes": 3532,
+          "sha256": "e9803be62f050f027828c2e45dc50011017aa6cbf8697469d8575c41e48a1b68"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 464,
+          "last_line": 561,
+          "first_byte": 20046,
+          "end_byte": 23578,
+          "bytes": 3532,
+          "sha256": "e9803be62f050f027828c2e45dc50011017aa6cbf8697469d8575c41e48a1b68"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.settings.timezone",
+        "original": {
+          "first_line": 4660,
+          "last_line": 4762,
+          "first_byte": 220558,
+          "end_byte": 224937,
+          "bytes": 4379,
+          "sha256": "9eb49d5c4eb26dc506371e1a291e433afcb6239f2402470c41373a55462c338a"
+        },
+        "path": "docs/intents/rules/settings.md",
+        "destination": {
+          "first_line": 565,
+          "last_line": 667,
+          "first_byte": 23585,
+          "end_byte": 27964,
+          "bytes": 4379,
+          "sha256": "9eb49d5c4eb26dc506371e1a291e433afcb6239f2402470c41373a55462c338a"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.history.search",
+        "original": {
+          "first_line": 4766,
+          "last_line": 4847,
+          "first_byte": 224974,
+          "end_byte": 228203,
+          "bytes": 3229,
+          "sha256": "a1af85d7982a3b652dd0e3a16525371fef85eaad4df91ec3cab8cc0e957e6a93"
+        },
+        "path": "docs/intents/rules/history.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 90,
+          "first_byte": 490,
+          "end_byte": 3719,
+          "bytes": 3229,
+          "sha256": "a1af85d7982a3b652dd0e3a16525371fef85eaad4df91ec3cab8cc0e957e6a93"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.actionlog.recent",
+        "original": {
+          "first_line": 4851,
+          "last_line": 4927,
+          "first_byte": 228210,
+          "end_byte": 231093,
+          "bytes": 2883,
+          "sha256": "3b89234e18b902b98e6ecfccb98758d252dfb558af088688d663abc8ccfbfe8a"
+        },
+        "path": "docs/intents/rules/history.md",
+        "destination": {
+          "first_line": 94,
+          "last_line": 170,
+          "first_byte": 3726,
+          "end_byte": 6609,
+          "bytes": 2883,
+          "sha256": "3b89234e18b902b98e6ecfccb98758d252dfb558af088688d663abc8ccfbfe8a"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.memory.remember",
+        "original": {
+          "first_line": 4931,
+          "last_line": 5003,
+          "first_byte": 231112,
+          "end_byte": 233722,
+          "bytes": 2610,
+          "sha256": "746e3cd8f17321ac3b52a437869c053629f60e0b2af0807f6a6e97a65ef68e3f"
+        },
+        "path": "docs/intents/rules/memory.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 81,
+          "first_byte": 506,
+          "end_byte": 3116,
+          "bytes": 2610,
+          "sha256": "746e3cd8f17321ac3b52a437869c053629f60e0b2af0807f6a6e97a65ef68e3f"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.time.now",
+        "original": {
+          "first_line": 5007,
+          "last_line": 5080,
+          "first_byte": 233763,
+          "end_byte": 236759,
+          "bytes": 2996,
+          "sha256": "3600f1c3af426745ad4db63e86836457b9f6b5b74fcd6501940257b52ac2fd19"
+        },
+        "path": "docs/intents/rules/utility.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 82,
+          "first_byte": 499,
+          "end_byte": 3495,
+          "bytes": 2996,
+          "sha256": "3600f1c3af426745ad4db63e86836457b9f6b5b74fcd6501940257b52ac2fd19"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.time.convert",
+        "original": {
+          "first_line": 5084,
+          "last_line": 5179,
+          "first_byte": 236766,
+          "end_byte": 240577,
+          "bytes": 3811,
+          "sha256": "e4d3de95fcb48dfd8e3e9962fa696aa2b56ab94fca2d5d449d6fac97c107da3a"
+        },
+        "path": "docs/intents/rules/utility.md",
+        "destination": {
+          "first_line": 86,
+          "last_line": 181,
+          "first_byte": 3502,
+          "end_byte": 7313,
+          "bytes": 3811,
+          "sha256": "e4d3de95fcb48dfd8e3e9962fa696aa2b56ab94fca2d5d449d6fac97c107da3a"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.calc.evaluate",
+        "original": {
+          "first_line": 5183,
+          "last_line": 5244,
+          "first_byte": 240584,
+          "end_byte": 242477,
+          "bytes": 1893,
+          "sha256": "0ce3dbc58bd01d4719d59ede9b4a8a7fca223dd1f2121c7ddac2c0a3f0f39a99"
+        },
+        "path": "docs/intents/rules/utility.md",
+        "destination": {
+          "first_line": 185,
+          "last_line": 246,
+          "first_byte": 7320,
+          "end_byte": 9213,
+          "bytes": 1893,
+          "sha256": "0ce3dbc58bd01d4719d59ede9b4a8a7fca223dd1f2121c7ddac2c0a3f0f39a99"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.google.status",
+        "original": {
+          "first_line": 5248,
+          "last_line": 5306,
+          "first_byte": 242509,
+          "end_byte": 245471,
+          "bytes": 2962,
+          "sha256": "86d439f40432e90bcfa49b7e9de7f7acf53f66c58ecdb05637e3c952e090f62a"
+        },
+        "path": "docs/intents/rules/google.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 67,
+          "first_byte": 524,
+          "end_byte": 3486,
+          "bytes": 2962,
+          "sha256": "86d439f40432e90bcfa49b7e9de7f7acf53f66c58ecdb05637e3c952e090f62a"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.google.calendars",
+        "original": {
+          "first_line": 5310,
+          "last_line": 5367,
+          "first_byte": 245478,
+          "end_byte": 247942,
+          "bytes": 2464,
+          "sha256": "1db9c8aaf8a52545c7cf4bbf1a75f17c50e9f2deaf3d5840df48c697c6bf4ff5"
+        },
+        "path": "docs/intents/rules/google.md",
+        "destination": {
+          "first_line": 71,
+          "last_line": 128,
+          "first_byte": 3493,
+          "end_byte": 5957,
+          "bytes": 2464,
+          "sha256": "1db9c8aaf8a52545c7cf4bbf1a75f17c50e9f2deaf3d5840df48c697c6bf4ff5"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.google.connect_help",
+        "original": {
+          "first_line": 5371,
+          "last_line": 5426,
+          "first_byte": 247949,
+          "end_byte": 251655,
+          "bytes": 3706,
+          "sha256": "117bf9c942ace9438103c7c3b69033ba8e57e1e7be719c8f3d427a87e935b409"
+        },
+        "path": "docs/intents/rules/google.md",
+        "destination": {
+          "first_line": 132,
+          "last_line": 187,
+          "first_byte": 5964,
+          "end_byte": 9670,
+          "bytes": 3706,
+          "sha256": "117bf9c942ace9438103c7c3b69033ba8e57e1e7be719c8f3d427a87e935b409"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.telegram.status",
+        "original": {
+          "first_line": 5430,
+          "last_line": 5495,
+          "first_byte": 251662,
+          "end_byte": 255603,
+          "bytes": 3941,
+          "sha256": "4a30cbc197718b7679e5038bbd364292124fe0140ea536e6c237d1f446e1dadf"
+        },
+        "path": "docs/intents/rules/google.md",
+        "destination": {
+          "first_line": 191,
+          "last_line": 256,
+          "first_byte": 9677,
+          "end_byte": 13618,
+          "bytes": 3941,
+          "sha256": "4a30cbc197718b7679e5038bbd364292124fe0140ea536e6c237d1f446e1dadf"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.secretary.list",
+        "original": {
+          "first_line": 5499,
+          "last_line": 5555,
+          "first_byte": 255643,
+          "end_byte": 258019,
+          "bytes": 2376,
+          "sha256": "e3827c4b882865c2447501633e7588584b1b8f49d0decabaf8c38e6ac777775e"
+        },
+        "path": "docs/intents/rules/secretary.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 65,
+          "first_byte": 522,
+          "end_byte": 2898,
+          "bytes": 2376,
+          "sha256": "e3827c4b882865c2447501633e7588584b1b8f49d0decabaf8c38e6ac777775e"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.secretary.invite",
+        "original": {
+          "first_line": 5559,
+          "last_line": 5668,
+          "first_byte": 258026,
+          "end_byte": 263582,
+          "bytes": 5556,
+          "sha256": "f1364444540466e2afa287942fae094e9a1146a3b66e36bf3fe089885fc6af46"
+        },
+        "path": "docs/intents/rules/secretary.md",
+        "destination": {
+          "first_line": 69,
+          "last_line": 178,
+          "first_byte": 2905,
+          "end_byte": 8461,
+          "bytes": 5556,
+          "sha256": "f1364444540466e2afa287942fae094e9a1146a3b66e36bf3fe089885fc6af46"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.secretary.clarify",
+        "original": {
+          "first_line": 5672,
+          "last_line": 5724,
+          "first_byte": 263589,
+          "end_byte": 266712,
+          "bytes": 3123,
+          "sha256": "f243fe4ef8d1e43694806030f3def69ebd01fc8e2904218506607ceb55459dba"
+        },
+        "path": "docs/intents/rules/secretary.md",
+        "destination": {
+          "first_line": 182,
+          "last_line": 234,
+          "first_byte": 8468,
+          "end_byte": 11591,
+          "bytes": 3123,
+          "sha256": "f243fe4ef8d1e43694806030f3def69ebd01fc8e2904218506607ceb55459dba"
+        },
+        "raw_equal": true
+      },
+      {
+        "name": "basis.bot.info",
+        "original": {
+          "first_line": 5728,
+          "last_line": 5778,
+          "first_byte": 266758,
+          "end_byte": 269185,
+          "bytes": 2427,
+          "sha256": "70a4b7813b368cb3509d67571526f52acb5c78f40653120ce8595a65fb05cdd8"
+        },
+        "path": "docs/intents/rules/bot.md",
+        "destination": {
+          "first_line": 9,
+          "last_line": 59,
+          "first_byte": 482,
+          "end_byte": 2909,
+          "bytes": 2427,
+          "sha256": "70a4b7813b368cb3509d67571526f52acb5c78f40653120ce8595a65fb05cdd8"
+        },
+        "raw_equal": true
+      }
+    ],
+    "separators": [
+      {
+        "path": "docs/intents/rules/calendar.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 628,
+          "last_line": 629,
+          "first_byte": 28778,
+          "end_byte": 28780,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/slots.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 342,
+          "last_line": 343,
+          "first_byte": 16687,
+          "end_byte": 16689,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/events-1.md",
+        "original_separator_hex": "0a0a2d2d2d0a0a",
+        "destination": {
+          "first_line": 971,
+          "last_line": 974,
+          "first_byte": 46570,
+          "end_byte": 46577,
+          "bytes": 7,
+          "sha256": "ad1af52e2872615af2fa5e2f98419639145253a3fa6cfd93f4b62bdf1318c160"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/events-2.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 496,
+          "last_line": 497,
+          "first_byte": 23129,
+          "end_byte": 23131,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/reminders.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 604,
+          "last_line": 605,
+          "first_byte": 27617,
+          "end_byte": 27619,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/invitations.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 308,
+          "last_line": 309,
+          "first_byte": 14912,
+          "end_byte": 14914,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/contacts.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 679,
+          "last_line": 680,
+          "first_byte": 27347,
+          "end_byte": 27349,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/settings.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 667,
+          "last_line": 668,
+          "first_byte": 27964,
+          "end_byte": 27966,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/history.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 170,
+          "last_line": 171,
+          "first_byte": 6609,
+          "end_byte": 6611,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/memory.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 81,
+          "last_line": 82,
+          "first_byte": 3116,
+          "end_byte": 3118,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/utility.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 246,
+          "last_line": 247,
+          "first_byte": 9213,
+          "end_byte": 9215,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/google.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 256,
+          "last_line": 257,
+          "first_byte": 13618,
+          "end_byte": 13620,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/secretary.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 234,
+          "last_line": 235,
+          "first_byte": 11591,
+          "end_byte": 11593,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      },
+      {
+        "path": "docs/intents/rules/bot.md",
+        "original_separator_hex": "0a0a",
+        "destination": {
+          "first_line": 59,
+          "last_line": 60,
+          "first_byte": 2909,
+          "end_byte": 2911,
+          "bytes": 2,
+          "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070"
+        },
+        "added_footer": "[Back to catalogue](../README.md)\n"
+      }
+    ],
+    "workflows": [
+      {
+        "name": "basis.calendar.day",
+        "original": {
+          "first_line": 138,
+          "last_line": 171,
+          "first_byte": 46745,
+          "end_byte": 47846,
+          "bytes": 1101,
+          "sha256": "f8bb5f56d3b29b8ba9060919ef296b556ce9e97ee275a10b83dc38fbd014b44c"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 39,
+          "first_byte": 615,
+          "end_byte": 1716,
+          "bytes": 1101,
+          "sha256": "f8bb5f56d3b29b8ba9060919ef296b556ce9e97ee275a10b83dc38fbd014b44c"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.day\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calendar.period",
+        "original": {
+          "first_line": 172,
+          "last_line": 220,
+          "first_byte": 52583,
+          "end_byte": 54673,
+          "bytes": 2090,
+          "sha256": "d02f3485d461b2e4fbc7ef9667168d93711c99bbff03bb012ec5aa349e63d66d"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 42,
+          "last_line": 90,
+          "first_byte": 1946,
+          "end_byte": 4036,
+          "bytes": 2090,
+          "sha256": "d02f3485d461b2e4fbc7ef9667168d93711c99bbff03bb012ec5aa349e63d66d"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.period\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calendar.upcoming",
+        "original": {
+          "first_line": 221,
+          "last_line": 246,
+          "first_byte": 57673,
+          "end_byte": 58370,
+          "bytes": 697,
+          "sha256": "091837875413d08bcaad25b43aa01a8c342f6c61ca465224be4ac561c83acd9e"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 93,
+          "last_line": 118,
+          "first_byte": 4240,
+          "end_byte": 4937,
+          "bytes": 697,
+          "sha256": "091837875413d08bcaad25b43aa01a8c342f6c61ca465224be4ac561c83acd9e"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.upcoming\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calendar.search",
+        "original": {
+          "first_line": 247,
+          "last_line": 269,
+          "first_byte": 61151,
+          "end_byte": 61665,
+          "bytes": 514,
+          "sha256": "281f024846ea2085806c6587449916b0d5dc20e7433dfa4fd0236e8923d0ffbd"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 121,
+          "last_line": 143,
+          "first_byte": 5149,
+          "end_byte": 5663,
+          "bytes": 514,
+          "sha256": "281f024846ea2085806c6587449916b0d5dc20e7433dfa4fd0236e8923d0ffbd"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.search\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calendar.count",
+        "original": {
+          "first_line": 270,
+          "last_line": 329,
+          "first_byte": 65556,
+          "end_byte": 68037,
+          "bytes": 2481,
+          "sha256": "fa3b1fc0c4c80ff372faee29f8c4093b9baa1b27091c7e7b549d0f140c920e81"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 146,
+          "last_line": 205,
+          "first_byte": 5872,
+          "end_byte": 8353,
+          "bytes": 2481,
+          "sha256": "fa3b1fc0c4c80ff372faee29f8c4093b9baa1b27091c7e7b549d0f140c920e81"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.count\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calendar.image",
+        "original": {
+          "first_line": 330,
+          "last_line": 397,
+          "first_byte": 73729,
+          "end_byte": 76586,
+          "bytes": 2857,
+          "sha256": "ebf5ae5df2e70c73c1824bfbca016268856c65bebf51a3459e14fded2d369931"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 208,
+          "last_line": 275,
+          "first_byte": 8552,
+          "end_byte": 11409,
+          "bytes": 2857,
+          "sha256": "ebf5ae5df2e70c73c1824bfbca016268856c65bebf51a3459e14fded2d369931"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.image\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.holidays.upcoming",
+        "original": {
+          "first_line": 398,
+          "last_line": 426,
+          "first_byte": 79580,
+          "end_byte": 80348,
+          "bytes": 768,
+          "sha256": "76cf13930ddc1d5871a47297767f22b23cf8e66750ddef5a7282cb68962564a8"
+        },
+        "path": "docs/intents/workflows/calendar.html",
+        "destination": {
+          "first_line": 278,
+          "last_line": 306,
+          "first_byte": 11617,
+          "end_byte": 12385,
+          "bytes": 768,
+          "sha256": "76cf13930ddc1d5871a47297767f22b23cf8e66750ddef5a7282cb68962564a8"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.holidays.upcoming\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.slots.day",
+        "original": {
+          "first_line": 427,
+          "last_line": 460,
+          "first_byte": 84374,
+          "end_byte": 85469,
+          "bytes": 1095,
+          "sha256": "b09c5524eaca773df05a98611957c9020a4e12257b1f8832027b35b360733297"
+        },
+        "path": "docs/intents/workflows/slots.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 39,
+          "first_byte": 693,
+          "end_byte": 1788,
+          "bytes": 1095,
+          "sha256": "b09c5524eaca773df05a98611957c9020a4e12257b1f8832027b35b360733297"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.day\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.slots.week",
+        "original": {
+          "first_line": 480,
+          "last_line": 569,
+          "first_byte": 91021,
+          "end_byte": 94530,
+          "bytes": 3509,
+          "sha256": "248e4286621b5df47785f5a30627baef340b1fd46d20edb43b08f1f9692eb3b2"
+        },
+        "path": "docs/intents/workflows/slots.html",
+        "destination": {
+          "first_line": 42,
+          "last_line": 131,
+          "first_byte": 1994,
+          "end_byte": 5503,
+          "bytes": 3509,
+          "sha256": "248e4286621b5df47785f5a30627baef340b1fd46d20edb43b08f1f9692eb3b2"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.week\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.slots.check_time",
+        "original": {
+          "first_line": 571,
+          "last_line": 631,
+          "first_byte": 99540,
+          "end_byte": 101716,
+          "bytes": 2176,
+          "sha256": "d0078aea464f85ad44795868bcfb5b96a4ccc48edaa206698c539456d0463b82"
+        },
+        "path": "docs/intents/workflows/slots.html",
+        "destination": {
+          "first_line": 134,
+          "last_line": 194,
+          "first_byte": 5728,
+          "end_byte": 7904,
+          "bytes": 2176,
+          "sha256": "d0078aea464f85ad44795868bcfb5b96a4ccc48edaa206698c539456d0463b82"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.check_time\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.create",
+        "original": {
+          "first_line": 633,
+          "last_line": 735,
+          "first_byte": 108428,
+          "end_byte": 112336,
+          "bytes": 3908,
+          "sha256": "73910508f76b490642b686e56fd735682e73d2c5ff860a3c88f4a73a6481c7d2"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 108,
+          "first_byte": 721,
+          "end_byte": 4629,
+          "bytes": 3908,
+          "sha256": "73910508f76b490642b686e56fd735682e73d2c5ff860a3c88f4a73a6481c7d2"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.create\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.show",
+        "original": {
+          "first_line": 737,
+          "last_line": 803,
+          "first_byte": 116246,
+          "end_byte": 118711,
+          "bytes": 2465,
+          "sha256": "0a0ed2fe4df2d87cbd65d4389c53fc5a08523001f7968e5ac4360745a5690e2d"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 111,
+          "last_line": 177,
+          "first_byte": 4876,
+          "end_byte": 7341,
+          "bytes": 2465,
+          "sha256": "0a0ed2fe4df2d87cbd65d4389c53fc5a08523001f7968e5ac4360745a5690e2d"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.show\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.reschedule",
+        "original": {
+          "first_line": 805,
+          "last_line": 935,
+          "first_byte": 126302,
+          "end_byte": 132122,
+          "bytes": 5820,
+          "sha256": "8176af90458e52a6140d3e06117978caace1833b903d53099b22bf60676df2a9"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 180,
+          "last_line": 310,
+          "first_byte": 7581,
+          "end_byte": 13401,
+          "bytes": 5820,
+          "sha256": "8176af90458e52a6140d3e06117978caace1833b903d53099b22bf60676df2a9"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.reschedule\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.rename",
+        "original": {
+          "first_line": 937,
+          "last_line": 1041,
+          "first_byte": 137260,
+          "end_byte": 141524,
+          "bytes": 4264,
+          "sha256": "373237fda002c1839f0e01cea022aa95f3ce4545d0d3283d7426b5ba65380b41"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 313,
+          "last_line": 417,
+          "first_byte": 13598,
+          "end_byte": 17862,
+          "bytes": 4264,
+          "sha256": "373237fda002c1839f0e01cea022aa95f3ce4545d0d3283d7426b5ba65380b41"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.rename\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.set_detail",
+        "original": {
+          "first_line": 1043,
+          "last_line": 1168,
+          "first_byte": 148049,
+          "end_byte": 153207,
+          "bytes": 5158,
+          "sha256": "d41d2e3592496b5c6f7fd8d6b0a10e2a7c33a129c5b52c8e3e8051348cd04c5e"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 420,
+          "last_line": 545,
+          "first_byte": 18096,
+          "end_byte": 23254,
+          "bytes": 5158,
+          "sha256": "d41d2e3592496b5c6f7fd8d6b0a10e2a7c33a129c5b52c8e3e8051348cd04c5e"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.set_detail\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.delete",
+        "original": {
+          "first_line": 1170,
+          "last_line": 1268,
+          "first_byte": 158478,
+          "end_byte": 162545,
+          "bytes": 4067,
+          "sha256": "db90e470b380b97188469b0450679864303219030c3afc3d6fe623a2939284c9"
+        },
+        "path": "docs/intents/workflows/events-1.html",
+        "destination": {
+          "first_line": 548,
+          "last_line": 646,
+          "first_byte": 23486,
+          "end_byte": 27553,
+          "bytes": 4067,
+          "sha256": "db90e470b380b97188469b0450679864303219030c3afc3d6fe623a2939284c9"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.delete\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.snooze",
+        "original": {
+          "first_line": 1270,
+          "last_line": 1395,
+          "first_byte": 168717,
+          "end_byte": 173625,
+          "bytes": 4908,
+          "sha256": "37653dcd396cfe2ce3b771cb5acfa0df849acd6d8686a15511461738a43c669e"
+        },
+        "path": "docs/intents/workflows/events-2.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 131,
+          "first_byte": 713,
+          "end_byte": 5621,
+          "bytes": 4908,
+          "sha256": "37653dcd396cfe2ce3b771cb5acfa0df849acd6d8686a15511461738a43c669e"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.snooze\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.hide",
+        "original": {
+          "first_line": 1397,
+          "last_line": 1501,
+          "first_byte": 178954,
+          "end_byte": 183476,
+          "bytes": 4522,
+          "sha256": "694fc7e8b7c2c59e0dd6faf591389f015cd71d5c239d3eef59f4d7ff569059a4"
+        },
+        "path": "docs/intents/workflows/events-2.html",
+        "destination": {
+          "first_line": 134,
+          "last_line": 238,
+          "first_byte": 5819,
+          "end_byte": 10341,
+          "bytes": 4522,
+          "sha256": "694fc7e8b7c2c59e0dd6faf591389f015cd71d5c239d3eef59f4d7ff569059a4"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.hide\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.event.create_range",
+        "original": {
+          "first_line": 1502,
+          "last_line": 1590,
+          "first_byte": 188939,
+          "end_byte": 192268,
+          "bytes": 3329,
+          "sha256": "0fe7c2cf89d835f954c5b57b2e483723b081ebd769246d25d356d0f934264929"
+        },
+        "path": "docs/intents/workflows/events-2.html",
+        "destination": {
+          "first_line": 241,
+          "last_line": 329,
+          "first_byte": 10589,
+          "end_byte": 13918,
+          "bytes": 3329,
+          "sha256": "0fe7c2cf89d835f954c5b57b2e483723b081ebd769246d25d356d0f934264929"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.create_range\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.reminder.set",
+        "original": {
+          "first_line": 1592,
+          "last_line": 1719,
+          "first_byte": 198777,
+          "end_byte": 203848,
+          "bytes": 5071,
+          "sha256": "41558e94f2f6e6bd2d14999308cf916394563318c3fdb96ab1185a9b147c2d56"
+        },
+        "path": "docs/intents/workflows/reminders.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 133,
+          "first_byte": 681,
+          "end_byte": 5752,
+          "bytes": 5071,
+          "sha256": "41558e94f2f6e6bd2d14999308cf916394563318c3fdb96ab1185a9b147c2d56"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.set\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.reminder.list",
+        "original": {
+          "first_line": 1721,
+          "last_line": 1794,
+          "first_byte": 208487,
+          "end_byte": 211174,
+          "bytes": 2687,
+          "sha256": "85c42f9fe3bdef8f78922f31f1542ef5ddc8a4a94070a2f92343a964f38bc11a"
+        },
+        "path": "docs/intents/workflows/reminders.html",
+        "destination": {
+          "first_line": 136,
+          "last_line": 209,
+          "first_byte": 5965,
+          "end_byte": 8652,
+          "bytes": 2687,
+          "sha256": "85c42f9fe3bdef8f78922f31f1542ef5ddc8a4a94070a2f92343a964f38bc11a"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.reminder.clear",
+        "original": {
+          "first_line": 1796,
+          "last_line": 1895,
+          "first_byte": 216380,
+          "end_byte": 220476,
+          "bytes": 4096,
+          "sha256": "5540e2de80a7f3bee7034bc0a3195f3f2b6e6c94e3d314ecbe9c2815dc5bb2fb"
+        },
+        "path": "docs/intents/workflows/reminders.html",
+        "destination": {
+          "first_line": 212,
+          "last_line": 311,
+          "first_byte": 8877,
+          "end_byte": 12973,
+          "bytes": 4096,
+          "sha256": "5540e2de80a7f3bee7034bc0a3195f3f2b6e6c94e3d314ecbe9c2815dc5bb2fb"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.clear\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.reminder.after",
+        "original": {
+          "first_line": 1896,
+          "last_line": 1978,
+          "first_byte": 225215,
+          "end_byte": 228229,
+          "bytes": 3014,
+          "sha256": "a7f64ab4c77000cb2f30f2b7ece95be74b9bab76530f5a77b8d82d7f909f26db"
+        },
+        "path": "docs/intents/workflows/reminders.html",
+        "destination": {
+          "first_line": 314,
+          "last_line": 396,
+          "first_byte": 13196,
+          "end_byte": 16210,
+          "bytes": 3014,
+          "sha256": "a7f64ab4c77000cb2f30f2b7ece95be74b9bab76530f5a77b8d82d7f909f26db"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.after\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.invite.send",
+        "original": {
+          "first_line": 1980,
+          "last_line": 2097,
+          "first_byte": 234465,
+          "end_byte": 239474,
+          "bytes": 5009,
+          "sha256": "86b94d2de36f3103a9adf8896978288bc9d26a86aac4b0c42924c6777645c887"
+        },
+        "path": "docs/intents/workflows/invitations.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 123,
+          "first_byte": 700,
+          "end_byte": 5709,
+          "bytes": 5009,
+          "sha256": "86b94d2de36f3103a9adf8896978288bc9d26a86aac4b0c42924c6777645c887"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/invitations.html#basis.invite.send\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.invite.status",
+        "original": {
+          "first_line": 2099,
+          "last_line": 2176,
+          "first_byte": 244032,
+          "end_byte": 247059,
+          "bytes": 3027,
+          "sha256": "95ae5ce4683155a3ef360264b7c07c60c0e674023da3ff0433f91e4b40991490"
+        },
+        "path": "docs/intents/workflows/invitations.html",
+        "destination": {
+          "first_line": 126,
+          "last_line": 203,
+          "first_byte": 5913,
+          "end_byte": 8940,
+          "bytes": 3027,
+          "sha256": "95ae5ce4683155a3ef360264b7c07c60c0e674023da3ff0433f91e4b40991490"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/invitations.html#basis.invite.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.list",
+        "original": {
+          "first_line": 2177,
+          "last_line": 2197,
+          "first_byte": 249695,
+          "end_byte": 250335,
+          "bytes": 640,
+          "sha256": "c48728d5f0f926c95d8cb2fb7802c70d0dfeee54fcaf27129c07b4bb7bb0b795"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 26,
+          "first_byte": 672,
+          "end_byte": 1312,
+          "bytes": 640,
+          "sha256": "c48728d5f0f926c95d8cb2fb7802c70d0dfeee54fcaf27129c07b4bb7bb0b795"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.find",
+        "original": {
+          "first_line": 2198,
+          "last_line": 2227,
+          "first_byte": 252836,
+          "end_byte": 253702,
+          "bytes": 866,
+          "sha256": "7a80bd851bbd9af04be7a98fae5db0966fcd4416943a1e1d14cf928b2821346f"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 29,
+          "last_line": 58,
+          "first_byte": 1512,
+          "end_byte": 2378,
+          "bytes": 866,
+          "sha256": "7a80bd851bbd9af04be7a98fae5db0966fcd4416943a1e1d14cf928b2821346f"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.find\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.add",
+        "original": {
+          "first_line": 2228,
+          "last_line": 2273,
+          "first_byte": 257152,
+          "end_byte": 258609,
+          "bytes": 1457,
+          "sha256": "937518abc0cb36aca3835178dfebaf6f4c52752ed2cdea370fd566682d98379d"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 61,
+          "last_line": 106,
+          "first_byte": 2567,
+          "end_byte": 4024,
+          "bytes": 1457,
+          "sha256": "937518abc0cb36aca3835178dfebaf6f4c52752ed2cdea370fd566682d98379d"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.add\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.rename",
+        "original": {
+          "first_line": 2275,
+          "last_line": 2346,
+          "first_byte": 262536,
+          "end_byte": 265228,
+          "bytes": 2692,
+          "sha256": "421d46a95ef530fd88b2c2a24432cf14c3312324a808d86a2a7af5ee2792a9e7"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 109,
+          "last_line": 180,
+          "first_byte": 4230,
+          "end_byte": 6922,
+          "bytes": 2692,
+          "sha256": "421d46a95ef530fd88b2c2a24432cf14c3312324a808d86a2a7af5ee2792a9e7"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.rename\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.set_username",
+        "original": {
+          "first_line": 2348,
+          "last_line": 2419,
+          "first_byte": 269171,
+          "end_byte": 271848,
+          "bytes": 2677,
+          "sha256": "01be5944c8740cea4129aeb0236a433aacafed42f91cccf7a8da53c85b99c82b"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 183,
+          "last_line": 254,
+          "first_byte": 7143,
+          "end_byte": 9820,
+          "bytes": 2677,
+          "sha256": "01be5944c8740cea4129aeb0236a433aacafed42f91cccf7a8da53c85b99c82b"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.set_username\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.contacts.delete",
+        "original": {
+          "first_line": 2421,
+          "last_line": 2486,
+          "first_byte": 275386,
+          "end_byte": 277991,
+          "bytes": 2605,
+          "sha256": "8d3ee0fce3a1c480c2274c862077fc69ad32d1c2f8d00229eed560ec90df77fb"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 257,
+          "last_line": 322,
+          "first_byte": 10061,
+          "end_byte": 12666,
+          "bytes": 2605,
+          "sha256": "8d3ee0fce3a1c480c2274c862077fc69ad32d1c2f8d00229eed560ec90df77fb"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.delete\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.call.start",
+        "original": {
+          "first_line": 2487,
+          "last_line": 2534,
+          "first_byte": 280778,
+          "end_byte": 282748,
+          "bytes": 1970,
+          "sha256": "9c17fa2a3969cf3574a61ffdb6f9436d12b6cd164ffa56ab2bce357b366daeb2"
+        },
+        "path": "docs/intents/workflows/contacts.html",
+        "destination": {
+          "first_line": 325,
+          "last_line": 372,
+          "first_byte": 12890,
+          "end_byte": 14860,
+          "bytes": 1970,
+          "sha256": "9c17fa2a3969cf3574a61ffdb6f9436d12b6cd164ffa56ab2bce357b366daeb2"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.call.start\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.view",
+        "original": {
+          "first_line": 2535,
+          "last_line": 2584,
+          "first_byte": 286097,
+          "end_byte": 287851,
+          "bytes": 1754,
+          "sha256": "72838ab89db3a709bb6c4ca7c11eb7a998afb58c5420aec0cca7ecdae5b39226"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 55,
+          "first_byte": 680,
+          "end_byte": 2434,
+          "bytes": 1754,
+          "sha256": "72838ab89db3a709bb6c4ca7c11eb7a998afb58c5420aec0cca7ecdae5b39226"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.view\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.toggle",
+        "original": {
+          "first_line": 2585,
+          "last_line": 2681,
+          "first_byte": 294181,
+          "end_byte": 297800,
+          "bytes": 3619,
+          "sha256": "2a437bab8acf4fc0afbbac76db3da740c51f9f440e2e7326720d1adac30b9f83"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 58,
+          "last_line": 154,
+          "first_byte": 2682,
+          "end_byte": 6301,
+          "bytes": 3619,
+          "sha256": "2a437bab8acf4fc0afbbac76db3da740c51f9f440e2e7326720d1adac30b9f83"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.toggle\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.agenda_time",
+        "original": {
+          "first_line": 2682,
+          "last_line": 2739,
+          "first_byte": 301494,
+          "end_byte": 303554,
+          "bytes": 2060,
+          "sha256": "b6ff532a6b46239e259a81815a5a13930ba58209a35483bf5d2828e77304eaab"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 157,
+          "last_line": 214,
+          "first_byte": 6545,
+          "end_byte": 8605,
+          "bytes": 2060,
+          "sha256": "b6ff532a6b46239e259a81815a5a13930ba58209a35483bf5d2828e77304eaab"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.agenda_time\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.duration",
+        "original": {
+          "first_line": 2740,
+          "last_line": 2794,
+          "first_byte": 308051,
+          "end_byte": 309738,
+          "bytes": 1687,
+          "sha256": "328f10b60242ee36a49ae4b627878c3af6ee02fe99d012b0ff6758d7861d4711"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 217,
+          "last_line": 271,
+          "first_byte": 8839,
+          "end_byte": 10526,
+          "bytes": 1687,
+          "sha256": "328f10b60242ee36a49ae4b627878c3af6ee02fe99d012b0ff6758d7861d4711"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.duration\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.language",
+        "original": {
+          "first_line": 2795,
+          "last_line": 2850,
+          "first_byte": 312703,
+          "end_byte": 314568,
+          "bytes": 1865,
+          "sha256": "a1acf3a32dab5b0876fefe1141d0407c0ce12a6f72531cf7c82614d6af2d47c3"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 274,
+          "last_line": 329,
+          "first_byte": 10729,
+          "end_byte": 12594,
+          "bytes": 1865,
+          "sha256": "a1acf3a32dab5b0876fefe1141d0407c0ce12a6f72531cf7c82614d6af2d47c3"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.language\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.settings.timezone",
+        "original": {
+          "first_line": 2851,
+          "last_line": 2906,
+          "first_byte": 318197,
+          "end_byte": 320281,
+          "bytes": 2084,
+          "sha256": "462bfa693b3a328735e07315faf55a8880fc5005da673323543eac7ec0a18d0e"
+        },
+        "path": "docs/intents/workflows/settings.html",
+        "destination": {
+          "first_line": 332,
+          "last_line": 387,
+          "first_byte": 12828,
+          "end_byte": 14912,
+          "bytes": 2084,
+          "sha256": "462bfa693b3a328735e07315faf55a8880fc5005da673323543eac7ec0a18d0e"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.timezone\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.history.search",
+        "original": {
+          "first_line": 2907,
+          "last_line": 2947,
+          "first_byte": 323408,
+          "end_byte": 324649,
+          "bytes": 1241,
+          "sha256": "7b4851b5fd6bdba976eefe53f0a8b8d2290de3124cbf3beada3a4e060a36a50a"
+        },
+        "path": "docs/intents/workflows/history.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 46,
+          "first_byte": 687,
+          "end_byte": 1928,
+          "bytes": 1241,
+          "sha256": "7b4851b5fd6bdba976eefe53f0a8b8d2290de3124cbf3beada3a4e060a36a50a"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/history.html#basis.history.search\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.actionlog.recent",
+        "original": {
+          "first_line": 2948,
+          "last_line": 2980,
+          "first_byte": 327447,
+          "end_byte": 328442,
+          "bytes": 995,
+          "sha256": "d07fabd311c45794b0a04914a5ba76e6aefcc7b61c2adc69f73927f03140ebc5"
+        },
+        "path": "docs/intents/workflows/history.html",
+        "destination": {
+          "first_line": 49,
+          "last_line": 81,
+          "first_byte": 2135,
+          "end_byte": 3130,
+          "bytes": 995,
+          "sha256": "d07fabd311c45794b0a04914a5ba76e6aefcc7b61c2adc69f73927f03140ebc5"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/history.html#basis.actionlog.recent\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.memory.remember",
+        "original": {
+          "first_line": 2981,
+          "last_line": 3011,
+          "first_byte": 331101,
+          "end_byte": 332029,
+          "bytes": 928,
+          "sha256": "da8f2e12bc434d5cb9534776780bff1e6960fec49224482cf57addcf28453c20"
+        },
+        "path": "docs/intents/workflows/memory.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 36,
+          "first_byte": 707,
+          "end_byte": 1635,
+          "bytes": 928,
+          "sha256": "da8f2e12bc434d5cb9534776780bff1e6960fec49224482cf57addcf28453c20"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/memory.html#basis.memory.remember\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.time.now",
+        "original": {
+          "first_line": 3012,
+          "last_line": 3043,
+          "first_byte": 335394,
+          "end_byte": 336250,
+          "bytes": 856,
+          "sha256": "9ee03980cabc64badb99f35ca9e983277eba9f07474cc71beb220cebd7b38ab3"
+        },
+        "path": "docs/intents/workflows/utility.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 37,
+          "first_byte": 702,
+          "end_byte": 1558,
+          "bytes": 856,
+          "sha256": "9ee03980cabc64badb99f35ca9e983277eba9f07474cc71beb220cebd7b38ab3"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.time.now\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.time.convert",
+        "original": {
+          "first_line": 3044,
+          "last_line": 3089,
+          "first_byte": 340115,
+          "end_byte": 341388,
+          "bytes": 1273,
+          "sha256": "fad3be63dc1aed79291fd180508038b6ba21507201c6ae0e77695ab0973f351f"
+        },
+        "path": "docs/intents/workflows/utility.html",
+        "destination": {
+          "first_line": 40,
+          "last_line": 85,
+          "first_byte": 1805,
+          "end_byte": 3078,
+          "bytes": 1273,
+          "sha256": "fad3be63dc1aed79291fd180508038b6ba21507201c6ae0e77695ab0973f351f"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.time.convert\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.calc.evaluate",
+        "original": {
+          "first_line": 3090,
+          "last_line": 3111,
+          "first_byte": 343556,
+          "end_byte": 344023,
+          "bytes": 467,
+          "sha256": "e3f1dd31388f9820177ae4af846fe13b9996b5ea9ab99a3dfccdf1a325f5ce90"
+        },
+        "path": "docs/intents/workflows/utility.html",
+        "destination": {
+          "first_line": 88,
+          "last_line": 109,
+          "first_byte": 3303,
+          "end_byte": 3770,
+          "bytes": 467,
+          "sha256": "e3f1dd31388f9820177ae4af846fe13b9996b5ea9ab99a3dfccdf1a325f5ce90"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.calc.evaluate\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.google.status",
+        "original": {
+          "first_line": 3112,
+          "last_line": 3132,
+          "first_byte": 347418,
+          "end_byte": 348072,
+          "bytes": 654,
+          "sha256": "4b12fe514643ad4597fec5d0f2c685c7a25803d23e82f425ae579bfd9823f0a2"
+        },
+        "path": "docs/intents/workflows/google.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 26,
+          "first_byte": 723,
+          "end_byte": 1377,
+          "bytes": 654,
+          "sha256": "4b12fe514643ad4597fec5d0f2c685c7a25803d23e82f425ae579bfd9823f0a2"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.google.calendars",
+        "original": {
+          "first_line": 3133,
+          "last_line": 3153,
+          "first_byte": 350782,
+          "end_byte": 351431,
+          "bytes": 649,
+          "sha256": "3de9f6d9450f0d3c888fac23fc1f1d4005fcb75762dbcda59b3b353f7fe17da4"
+        },
+        "path": "docs/intents/workflows/google.html",
+        "destination": {
+          "first_line": 29,
+          "last_line": 49,
+          "first_byte": 1594,
+          "end_byte": 2243,
+          "bytes": 649,
+          "sha256": "3de9f6d9450f0d3c888fac23fc1f1d4005fcb75762dbcda59b3b353f7fe17da4"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.calendars\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.google.connect_help",
+        "original": {
+          "first_line": 3154,
+          "last_line": 3169,
+          "first_byte": 355584,
+          "end_byte": 356313,
+          "bytes": 729,
+          "sha256": "980d235ff466cb599f2c4d59bed58535ace0d04eaf1af2e86654ca3bc29070f3"
+        },
+        "path": "docs/intents/workflows/google.html",
+        "destination": {
+          "first_line": 52,
+          "last_line": 67,
+          "first_byte": 2529,
+          "end_byte": 3258,
+          "bytes": 729,
+          "sha256": "980d235ff466cb599f2c4d59bed58535ace0d04eaf1af2e86654ca3bc29070f3"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.connect_help\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.telegram.status",
+        "original": {
+          "first_line": 3172,
+          "last_line": 3198,
+          "first_byte": 359942,
+          "end_byte": 361171,
+          "bytes": 1229,
+          "sha256": "47876580435b1bfc27848ebd474fd7060de4c7a8dd47b7ab0da4e49edce5ca51"
+        },
+        "path": "docs/intents/workflows/google.html",
+        "destination": {
+          "first_line": 70,
+          "last_line": 96,
+          "first_byte": 3486,
+          "end_byte": 4715,
+          "bytes": 1229,
+          "sha256": "47876580435b1bfc27848ebd474fd7060de4c7a8dd47b7ab0da4e49edce5ca51"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.telegram.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.secretary.list",
+        "original": {
+          "first_line": 3199,
+          "last_line": 3219,
+          "first_byte": 363736,
+          "end_byte": 364384,
+          "bytes": 648,
+          "sha256": "c9bf15231544d87bf59fe5102a4aa285b996b831796dcc3d506a630add8a2d37"
+        },
+        "path": "docs/intents/workflows/secretary.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 26,
+          "first_byte": 746,
+          "end_byte": 1394,
+          "bytes": 648,
+          "sha256": "c9bf15231544d87bf59fe5102a4aa285b996b831796dcc3d506a630add8a2d37"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.secretary.invite",
+        "original": {
+          "first_line": 3220,
+          "last_line": 3283,
+          "first_byte": 369367,
+          "end_byte": 371929,
+          "bytes": 2562,
+          "sha256": "ccc10689222f3f74beb8699a379bfea8f14d628e2cb21b350ecd2d6f65b3a206"
+        },
+        "path": "docs/intents/workflows/secretary.html",
+        "destination": {
+          "first_line": 29,
+          "last_line": 92,
+          "first_byte": 1619,
+          "end_byte": 4181,
+          "bytes": 2562,
+          "sha256": "ccc10689222f3f74beb8699a379bfea8f14d628e2cb21b350ecd2d6f65b3a206"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.invite\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.secretary.clarify",
+        "original": {
+          "first_line": 3284,
+          "last_line": 3299,
+          "first_byte": 375064,
+          "end_byte": 375863,
+          "bytes": 799,
+          "sha256": "04f1e01cb408abd95f43b026b50df788ad72bf787c6dd1fd9c36466fedfbd025"
+        },
+        "path": "docs/intents/workflows/secretary.html",
+        "destination": {
+          "first_line": 95,
+          "last_line": 110,
+          "first_byte": 4433,
+          "end_byte": 5232,
+          "bytes": 799,
+          "sha256": "04f1e01cb408abd95f43b026b50df788ad72bf787c6dd1fd9c36466fedfbd025"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.clarify\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "name": "basis.bot.info",
+        "original": {
+          "first_line": 3300,
+          "last_line": 3312,
+          "first_byte": 379082,
+          "end_byte": 379313,
+          "bytes": 231,
+          "sha256": "ce2dedf8c757711571f1739a0ca1c5e1ace26f3c281d6ac2d5741d59faf4546e"
+        },
+        "path": "docs/intents/workflows/bot.html",
+        "destination": {
+          "first_line": 6,
+          "last_line": 18,
+          "first_byte": 699,
+          "end_byte": 930,
+          "bytes": 231,
+          "sha256": "ce2dedf8c757711571f1739a0ca1c5e1ace26f3c281d6ac2d5741d59faf4546e"
+        },
+        "raw_equal": true,
+        "visible_link": "<p><a class=\"workflow-link\" href=\"workflows/bot.html#basis.bot.info\">Full workflow (JSON)</a></p>"
+      }
+    ],
+    "complete_html_reconstructed_exactly": true,
+    "css_body_raw_equal": true,
+    "script_body_raw_equal": true,
+    "physical_part_lines": {
+      "README.md": 310,
+      "index.css": 45,
+      "index.html": 182,
+      "index.js": 27,
+      "rules/bot.md": 61,
+      "rules/calendar.md": 630,
+      "rules/contacts.md": 681,
+      "rules/events-1.md": 975,
+      "rules/events-2.md": 498,
+      "rules/google.md": 258,
+      "rules/history.md": 172,
+      "rules/invitations.md": 310,
+      "rules/memory.md": 83,
+      "rules/reminders.md": 606,
+      "rules/secretary.md": 236,
+      "rules/settings.md": 669,
+      "rules/slots.md": 344,
+      "rules/utility.md": 248,
+      "workflows/bot.html": 21,
+      "workflows/calendar.html": 309,
+      "workflows/contacts.html": 375,
+      "workflows/events-1.html": 649,
+      "workflows/events-2.html": 332,
+      "workflows/google.html": 99,
+      "workflows/history.html": 84,
+      "workflows/invitations.html": 206,
+      "workflows/memory.html": 39,
+      "workflows/reminders.html": 399,
+      "workflows/secretary.html": 113,
+      "workflows/settings.html": 390,
+      "workflows/slots.html": 197,
+      "workflows/utility.html": 112
+    },
+    "current_outputs_sha256": [
+      {
+        "path": "docs/intents/README.md",
+        "sha256": "ac5049771446faebbad68d410afc29bf812d1c43923795810a6f663bcaf3e311"
+      },
+      {
+        "path": "docs/intents/catalogue.json",
+        "sha256": "f31ff8682cd7a7851e4601ef81b85e011d8887ed1cb28f968fb951b1eeb5f0aa"
+      },
+      {
+        "path": "docs/intents/index.css",
+        "sha256": "8e8fac0be263535d042f1db0cb2d9b63c6e8e4d7f1566e8a7edc7af51151799a"
+      },
+      {
+        "path": "docs/intents/index.html",
+        "sha256": "37181101c78b73766bed8009df37b94527c8a116017ec3e879f853d316f603f7"
+      },
+      {
+        "path": "docs/intents/index.js",
+        "sha256": "40782bdb1e53ecf3cbff591457920de56f1dc0704711decfb874742d77665858"
+      },
+      {
+        "path": "docs/intents/rules/bot.md",
+        "sha256": "8f1c4c5b1fd5727d79912f93753ba950e5180b9519a2f763ab2155f8c8b1fcd3"
+      },
+      {
+        "path": "docs/intents/rules/calendar-1.md",
+        "sha256": "ea67323ceff149a4ae8013439e000f7557d03b6346d453948141ba478f8ef777"
+      },
+      {
+        "path": "docs/intents/rules/calendar-2.md",
+        "sha256": "d93d25d67de322d7ea74fb3bd53bd287d627d8e53d4f2c7230859ab013caa080"
+      },
+      {
+        "path": "docs/intents/rules/contacts.md",
+        "sha256": "05255026324d5e1509982c8963b6c6d1af8beb876d4cb9930e7eeb3654bcaa25"
+      },
+      {
+        "path": "docs/intents/rules/events-1.md",
+        "sha256": "876b4b8a4af62a21dcb3c4e031dad80b202fc0853a81b43ec0d02f2db0082139"
+      },
+      {
+        "path": "docs/intents/rules/events-2.md",
+        "sha256": "fcc4f1c28ee3871276c33beab22197e727e3c48153e987517472bccab2455021"
+      },
+      {
+        "path": "docs/intents/rules/google.md",
+        "sha256": "6ade452ff983981343d7f6e0fab9a11e7146d9fc2f219bab3be297101d4c3a0a"
+      },
+      {
+        "path": "docs/intents/rules/history.md",
+        "sha256": "539f95d0285e31eacc2b8013cc338ac49b90a47e2e993292a2c46589d8d9d940"
+      },
+      {
+        "path": "docs/intents/rules/invitations.md",
+        "sha256": "fb13020d04dd1c6b92124caf14cd3cf6233e4ccc0dc0f96bc52aa0435fd7c470"
+      },
+      {
+        "path": "docs/intents/rules/memory.md",
+        "sha256": "052d94a8ea686f29bed13f0b0ed2c7c2b9a47fe4161a7f62836b807d06b33e12"
+      },
+      {
+        "path": "docs/intents/rules/reminders.md",
+        "sha256": "49089982ccce3b5edef2b74921927918981b39248e7b2da7c1945ba637c723f6"
+      },
+      {
+        "path": "docs/intents/rules/secretary.md",
+        "sha256": "73fd77e6d7f217b19208927f6c1d0066f7093d8409b79d0b9fb9b9f95b31f2c0"
+      },
+      {
+        "path": "docs/intents/rules/settings.md",
+        "sha256": "165f94eb41b041a053cb9b8ff5c11fd8a00e1915f7dd4fbd551f3cf8a8565697"
+      },
+      {
+        "path": "docs/intents/rules/slots.md",
+        "sha256": "7ab45233b38cb9ba3b7a27ec9c1e9903100766da61b49c6dfba593a82a04d6d3"
+      },
+      {
+        "path": "docs/intents/rules/utility.md",
+        "sha256": "75baa294fa65043e2a4a9e3e80dc3c189ad99d344b27c214bcf3fae112307b3c"
+      },
+      {
+        "path": "docs/intents/workflows/bot.html",
+        "sha256": "97a3fb79960da479424fabdbf3da7384c8d9df017cb992b988875831c6ca73d6"
+      },
+      {
+        "path": "docs/intents/workflows/calendar-1.html",
+        "sha256": "62d2e50bdc44758fe10d82b8da9fde24aa66cbd962f61e94ffcc467f9accc78e"
+      },
+      {
+        "path": "docs/intents/workflows/calendar-2.html",
+        "sha256": "27c5d3669976de616b1054d14dc1ca54ba73440e6215d17608473cfc5bc2bf60"
+      },
+      {
+        "path": "docs/intents/workflows/contacts.html",
+        "sha256": "f671b12d5db37bd1089a1fecc3d9ee55c4a38fc5a3d595d3482b00bea876f222"
+      },
+      {
+        "path": "docs/intents/workflows/events-1.html",
+        "sha256": "f359b90e40dc77e173007650432fa5902243680ac8e35158881037120a29fcfd"
+      },
+      {
+        "path": "docs/intents/workflows/events-2.html",
+        "sha256": "dc36b923e670b7fd6e2d29e2b466c9c368d080754a145f6371ce2584ac1390ad"
+      },
+      {
+        "path": "docs/intents/workflows/google.html",
+        "sha256": "e59022e1b8e499c7cb5f0e2823c7c76ec052c1e8415abc4b12cca37c4f230a14"
+      },
+      {
+        "path": "docs/intents/workflows/history.html",
+        "sha256": "f7149f6541ff4fda040eadc7a360f5391edd3c76c369e27c70605c6d5c320354"
+      },
+      {
+        "path": "docs/intents/workflows/invitations.html",
+        "sha256": "905f59640c6848036e83d4b08beb5f7f5695ec54fd10a34bae6a13966d9ccc8a"
+      },
+      {
+        "path": "docs/intents/workflows/memory.html",
+        "sha256": "f8ba062ab6e44dbe66d0968098e2baddae490851b538d568667b0644c1835429"
+      },
+      {
+        "path": "docs/intents/workflows/reminders.html",
+        "sha256": "406c43f6ee52c455c4170cbbca4b33155f9d2825485ada8945a697f148f78888"
+      },
+      {
+        "path": "docs/intents/workflows/secretary.html",
+        "sha256": "255d8365039f8c4579c0e0b465fe671f529fc7859ee311394fe4ff6a86fa6107"
+      },
+      {
+        "path": "docs/intents/workflows/settings.html",
+        "sha256": "7ddd9fca9eead7358c1a3add786d383545d7a2c03668acd31de16f607fbe0835"
+      },
+      {
+        "path": "docs/intents/workflows/slots.html",
+        "sha256": "4be65b1a98fe30a91f22ff6b047aea1b54d240b155f1cb9060cd170e549d8c06"
+      },
+      {
+        "path": "docs/intents/workflows/utility.html",
+        "sha256": "1f58f522c4a8525e39f30481f27ec0e3fb4e0907d136c9080f1acc6bdbb872ab"
+      }
+    ],
+    "current_physical_part_lines": {
+      "docs/intents/README.md": 312,
+      "docs/intents/index.css": 45,
+      "docs/intents/index.html": 281,
+      "docs/intents/index.js": 27,
+      "docs/intents/rules/bot.md": 67,
+      "docs/intents/rules/calendar-1.md": 961,
+      "docs/intents/rules/calendar-2.md": 111,
+      "docs/intents/rules/contacts.md": 692,
+      "docs/intents/rules/events-1.md": 887,
+      "docs/intents/rules/events-2.md": 581,
+      "docs/intents/rules/google.md": 261,
+      "docs/intents/rules/history.md": 172,
+      "docs/intents/rules/invitations.md": 507,
+      "docs/intents/rules/memory.md": 83,
+      "docs/intents/rules/reminders.md": 695,
+      "docs/intents/rules/secretary.md": 236,
+      "docs/intents/rules/settings.md": 670,
+      "docs/intents/rules/slots.md": 408,
+      "docs/intents/rules/utility.md": 255,
+      "docs/intents/workflows/bot.html": 21,
+      "docs/intents/workflows/calendar-1.html": 495,
+      "docs/intents/workflows/calendar-2.html": 60,
+      "docs/intents/workflows/contacts.html": 375,
+      "docs/intents/workflows/events-1.html": 576,
+      "docs/intents/workflows/events-2.html": 391,
+      "docs/intents/workflows/google.html": 99,
+      "docs/intents/workflows/history.html": 84,
+      "docs/intents/workflows/invitations.html": 330,
+      "docs/intents/workflows/memory.html": 39,
+      "docs/intents/workflows/reminders.html": 462,
+      "docs/intents/workflows/secretary.html": 113,
+      "docs/intents/workflows/settings.html": 390,
+      "docs/intents/workflows/slots.html": 233,
+      "docs/intents/workflows/utility.html": 112
+    },
+    "readme_raw_map": {
+      "before_lines": 5961,
+      "after_lines": 6081,
+      "before_sha256": "be93115ada88533fb43a61c9a25f35fa778dc062bc151ecda8650621c1196aea",
+      "after_sha256": "62d31dd91b7095e976817f5b2630d89c0690623ad214d8e98ddf239c52db4da6",
+      "equal_lines": 5842,
+      "all_bytes_accounted": true,
+      "hunks": [
+        {
+          "tag": "insert",
+          "old_start": 48,
+          "old_end": 47,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 48,
+              "end": 49
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "a949a1e4b73d8a6a4c182c177cece931a38d741b2d211595fb21027e2ddde7e4"
+        },
+        {
+          "tag": "replace",
+          "old_start": 56,
+          "old_end": 107,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 58,
+              "end": 128
+            },
+            {
+              "path": "docs/intents/rules/calendar.md",
+              "start": 1,
+              "end": 1
+            }
+          ],
+          "old_sha256": "ffa6970bd4043038a4a093a10dd65fe079a09e1869524c2873dcffae128e254b",
+          "new_sha256": "d43ac14288ab2e5081df305b05d43fbd64f55a5d0563cd2790339e860525ff2d"
+        },
+        {
+          "tag": "insert",
+          "old_start": 110,
+          "old_end": 109,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/calendar.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "4ebfc64627715c7d73e884f9b45926121cf8a6c37900d4a381e915db01e9ece6"
+        },
+        {
+          "tag": "insert",
+          "old_start": 732,
+          "old_end": 731,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/calendar.md",
+              "start": 630,
+              "end": 630
+            },
+            {
+              "path": "docs/intents/rules/slots.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 733,
+          "old_end": 732,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/slots.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "338fc3b4397091d621ca5700c579bc1875e5ee1da55c7e679dcf3b462dc3f7d2"
+        },
+        {
+          "tag": "insert",
+          "old_start": 1069,
+          "old_end": 1068,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/slots.md",
+              "start": 344,
+              "end": 344
+            },
+            {
+              "path": "docs/intents/rules/events-1.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 1070,
+          "old_end": 1069,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-1.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "35691dec3168e28268dc304012849af38ee85284c3d645a993b9b0ec8a10ab8c"
+        },
+        {
+          "tag": "insert",
+          "old_start": 2037,
+          "old_end": 2036,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-1.md",
+              "start": 975,
+              "end": 975
+            },
+            {
+              "path": "docs/intents/rules/events-2.md",
+              "start": 1,
+              "end": 8
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "300be2b046ff74a8db5aa28398f3535f5dd520925b454e34d79f5d79cc5729a2"
+        },
+        {
+          "tag": "insert",
+          "old_start": 2526,
+          "old_end": 2525,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-2.md",
+              "start": 498,
+              "end": 498
+            },
+            {
+              "path": "docs/intents/rules/reminders.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 2527,
+          "old_end": 2526,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/reminders.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "4b6c5fac22ca914e254407c887c7b56c0768b2754bdc5059c80514d4ab99fe5c"
+        },
+        {
+          "tag": "insert",
+          "old_start": 3125,
+          "old_end": 3124,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/reminders.md",
+              "start": 606,
+              "end": 606
+            },
+            {
+              "path": "docs/intents/rules/invitations.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 3126,
+          "old_end": 3125,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/invitations.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d570897b43794dda45b57694ab5979557d7568c609b8c8c3a3546730168851c6"
+        },
+        {
+          "tag": "insert",
+          "old_start": 3428,
+          "old_end": 3427,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/invitations.md",
+              "start": 310,
+              "end": 310
+            },
+            {
+              "path": "docs/intents/rules/contacts.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 3429,
+          "old_end": 3428,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/contacts.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "f3634c171da3f391b325dc5775a6bc867cb2102a4e7aea3c7ba02792175106af"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4102,
+          "old_end": 4101,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/contacts.md",
+              "start": 681,
+              "end": 681
+            },
+            {
+              "path": "docs/intents/rules/settings.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4103,
+          "old_end": 4102,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/settings.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "ed6fe7002f17ba595ae760707ebeb242c822b2410dfac50bc80dba127cc6d6ae"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4764,
+          "old_end": 4763,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/settings.md",
+              "start": 669,
+              "end": 669
+            },
+            {
+              "path": "docs/intents/rules/history.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4765,
+          "old_end": 4764,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/history.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "76d0625205cdd0e78ddfdd93c668ee51d29198cf9552f64553206fed1a802fcb"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4929,
+          "old_end": 4928,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/history.md",
+              "start": 172,
+              "end": 172
+            },
+            {
+              "path": "docs/intents/rules/memory.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 4930,
+          "old_end": 4929,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/memory.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "7753272482b9a236ff50165f144029eec1abbdf6283e8c8d247bb7d76e05db62"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5005,
+          "old_end": 5004,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/memory.md",
+              "start": 83,
+              "end": 83
+            },
+            {
+              "path": "docs/intents/rules/utility.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5006,
+          "old_end": 5005,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/utility.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "cad5035eac86deff0b1d7b6d7b16ee044f59fc386c98cdaa40ae68e817cb2094"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5246,
+          "old_end": 5245,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/utility.md",
+              "start": 248,
+              "end": 248
+            },
+            {
+              "path": "docs/intents/rules/google.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5247,
+          "old_end": 5246,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/google.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "9f99eba539fe3176ab0fbed108b1725b4084b04f965e35bcb3b73efbd5cf5ccc"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5497,
+          "old_end": 5496,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/google.md",
+              "start": 258,
+              "end": 258
+            },
+            {
+              "path": "docs/intents/rules/secretary.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5498,
+          "old_end": 5497,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/secretary.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "910b06b920b4682d417efc1d711375e42eed1b19608544fcfaea7bbadf26c767"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5726,
+          "old_end": 5725,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/secretary.md",
+              "start": 236,
+              "end": 236
+            },
+            {
+              "path": "docs/intents/rules/bot.md",
+              "start": 1,
+              "end": 2
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "d0a82432c477930ac870086788f8cc7b806f3fb4aa5f0d55a388f2acd8b0fe01"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5727,
+          "old_end": 5726,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/bot.md",
+              "start": 4,
+              "end": 7
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "25d10489a2f4d75e41c54376a6555930955de188d6ad31c37eeff6e75fdebb6e"
+        },
+        {
+          "tag": "insert",
+          "old_start": 5780,
+          "old_end": 5779,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/bot.md",
+              "start": 61,
+              "end": 61
+            }
+          ],
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "5f4fc821543167c0a8f5ec5ec0e12644def8779cd4c2251d5006034fdb2765b4"
+        },
+        {
+          "tag": "replace",
+          "old_start": 5789,
+          "old_end": 5855,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 138,
+              "end": 204
+            }
+          ],
+          "old_sha256": "6bb10dd08248e0ecff8aeeb5c1094f1b6550f2dacedc07ed58c8cd9870f9e166",
+          "new_sha256": "13c0e390b88ff87ae9a8da9f340a2a4cf64d2993d3fce20b5a5e9f7e7aade5bb"
+        }
+      ],
+      "equal_ranges": [
+        {
+          "tag": "equal",
+          "old_start": 1,
+          "old_end": 47,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 1,
+              "end": 47
+            }
+          ],
+          "old_sha256": "7a6838ad0559c844432dd867275f6bf8f58dee661540f20781aee47f17d4a84a",
+          "new_sha256": "7a6838ad0559c844432dd867275f6bf8f58dee661540f20781aee47f17d4a84a"
+        },
+        {
+          "tag": "equal",
+          "old_start": 48,
+          "old_end": 55,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 50,
+              "end": 57
+            }
+          ],
+          "old_sha256": "bc5015c8f9d3fed5f482c21e7c9589718c3d5d919bea373827c7814e76d3da75",
+          "new_sha256": "bc5015c8f9d3fed5f482c21e7c9589718c3d5d919bea373827c7814e76d3da75"
+        },
+        {
+          "tag": "equal",
+          "old_start": 108,
+          "old_end": 109,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/calendar.md",
+              "start": 2,
+              "end": 3
+            }
+          ],
+          "old_sha256": "5b97818c671d74842fe0f023547713d60bdcd04895d1c5af555a06959b553831",
+          "new_sha256": "5b97818c671d74842fe0f023547713d60bdcd04895d1c5af555a06959b553831"
+        },
+        {
+          "tag": "equal",
+          "old_start": 110,
+          "old_end": 731,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/calendar.md",
+              "start": 8,
+              "end": 629
+            }
+          ],
+          "old_sha256": "c355cd5c071e3ce6956e95779dc4d9a5282162a9a1807b83f804527621fe1366",
+          "new_sha256": "c355cd5c071e3ce6956e95779dc4d9a5282162a9a1807b83f804527621fe1366"
+        },
+        {
+          "tag": "equal",
+          "old_start": 732,
+          "old_end": 732,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/slots.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "df010ffbe738dda0eed3192e4f22c547e27fd365c7ba9f9e2b7327e1f7ba3a10",
+          "new_sha256": "df010ffbe738dda0eed3192e4f22c547e27fd365c7ba9f9e2b7327e1f7ba3a10"
+        },
+        {
+          "tag": "equal",
+          "old_start": 733,
+          "old_end": 1068,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/slots.md",
+              "start": 8,
+              "end": 343
+            }
+          ],
+          "old_sha256": "8c44bdeef0cb5732341e26a036436b35f399cc68a9a47e8edcf901bd50bdfdd6",
+          "new_sha256": "8c44bdeef0cb5732341e26a036436b35f399cc68a9a47e8edcf901bd50bdfdd6"
+        },
+        {
+          "tag": "equal",
+          "old_start": 1069,
+          "old_end": 1069,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-1.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "166b8f4c09db7a0c7db91df7f9fd19418e7028c6138433ac9f574ecc2216305e",
+          "new_sha256": "166b8f4c09db7a0c7db91df7f9fd19418e7028c6138433ac9f574ecc2216305e"
+        },
+        {
+          "tag": "equal",
+          "old_start": 1070,
+          "old_end": 2036,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-1.md",
+              "start": 8,
+              "end": 974
+            }
+          ],
+          "old_sha256": "ce904cd2bdf15fdc176b814771ac6c0b1f540cddcb964741d7564426ebdeb690",
+          "new_sha256": "ce904cd2bdf15fdc176b814771ac6c0b1f540cddcb964741d7564426ebdeb690"
+        },
+        {
+          "tag": "equal",
+          "old_start": 2037,
+          "old_end": 2525,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/events-2.md",
+              "start": 9,
+              "end": 497
+            }
+          ],
+          "old_sha256": "ebb2d135061b8823402a2ee97e1c9a688f0560323b6e0fa378c8bf02e98e779f",
+          "new_sha256": "ebb2d135061b8823402a2ee97e1c9a688f0560323b6e0fa378c8bf02e98e779f"
+        },
+        {
+          "tag": "equal",
+          "old_start": 2526,
+          "old_end": 2526,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/reminders.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "be61db6c92488896fddc8473953a1197575ae4665a0d75881fcfa7c58b738086",
+          "new_sha256": "be61db6c92488896fddc8473953a1197575ae4665a0d75881fcfa7c58b738086"
+        },
+        {
+          "tag": "equal",
+          "old_start": 2527,
+          "old_end": 3124,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/reminders.md",
+              "start": 8,
+              "end": 605
+            }
+          ],
+          "old_sha256": "4c0873877402f47d2092fe2b70dc2c802f6a7294eeb84aea8cefd67c060a37c7",
+          "new_sha256": "4c0873877402f47d2092fe2b70dc2c802f6a7294eeb84aea8cefd67c060a37c7"
+        },
+        {
+          "tag": "equal",
+          "old_start": 3125,
+          "old_end": 3125,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/invitations.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "57057beda8c1987b194af8913b3e0933a935bcaa506fb33396bf8a0d0360480c",
+          "new_sha256": "57057beda8c1987b194af8913b3e0933a935bcaa506fb33396bf8a0d0360480c"
+        },
+        {
+          "tag": "equal",
+          "old_start": 3126,
+          "old_end": 3427,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/invitations.md",
+              "start": 8,
+              "end": 309
+            }
+          ],
+          "old_sha256": "13057862c45f54865e22e6490f8a9886c7bfae9b5a3c55268836142de81cc15a",
+          "new_sha256": "13057862c45f54865e22e6490f8a9886c7bfae9b5a3c55268836142de81cc15a"
+        },
+        {
+          "tag": "equal",
+          "old_start": 3428,
+          "old_end": 3428,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/contacts.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "c3689ba851afc3b2677aae658c0199bb4c8ca11ebe24b9b89782f6eb7155ce58",
+          "new_sha256": "c3689ba851afc3b2677aae658c0199bb4c8ca11ebe24b9b89782f6eb7155ce58"
+        },
+        {
+          "tag": "equal",
+          "old_start": 3429,
+          "old_end": 4101,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/contacts.md",
+              "start": 8,
+              "end": 680
+            }
+          ],
+          "old_sha256": "6492168a49718254828883269039a1603225739e8592dca0f987f2cbec941d8d",
+          "new_sha256": "6492168a49718254828883269039a1603225739e8592dca0f987f2cbec941d8d"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4102,
+          "old_end": 4102,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/settings.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "321ca33bcaaec34b29a50ba1833a9532f0fffe1a4aca655ea25bbd565bd7e536",
+          "new_sha256": "321ca33bcaaec34b29a50ba1833a9532f0fffe1a4aca655ea25bbd565bd7e536"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4103,
+          "old_end": 4763,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/settings.md",
+              "start": 8,
+              "end": 668
+            }
+          ],
+          "old_sha256": "cbb82fd9bc3800fe5d75ca221ed79d141f178deb495178d4913ee8a7df52a049",
+          "new_sha256": "cbb82fd9bc3800fe5d75ca221ed79d141f178deb495178d4913ee8a7df52a049"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4764,
+          "old_end": 4764,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/history.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "f0429e385db5952df64b86e37c8861d8ea4aacbe34e94034bd9cab5933bef180",
+          "new_sha256": "f0429e385db5952df64b86e37c8861d8ea4aacbe34e94034bd9cab5933bef180"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4765,
+          "old_end": 4928,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/history.md",
+              "start": 8,
+              "end": 171
+            }
+          ],
+          "old_sha256": "8037286c2dc89df15889ccd2cf4b25bc38afb167c709a60ae803e17fcfe0ba58",
+          "new_sha256": "8037286c2dc89df15889ccd2cf4b25bc38afb167c709a60ae803e17fcfe0ba58"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4929,
+          "old_end": 4929,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/memory.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "c19558c98c09a54e40b26012eb0aa29b5a7607df946c949a0c78fa9cc8c90e62",
+          "new_sha256": "c19558c98c09a54e40b26012eb0aa29b5a7607df946c949a0c78fa9cc8c90e62"
+        },
+        {
+          "tag": "equal",
+          "old_start": 4930,
+          "old_end": 5004,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/memory.md",
+              "start": 8,
+              "end": 82
+            }
+          ],
+          "old_sha256": "bdb88bde736f3f50334341a3767f402572a3745438928fb64ab3e8bed01a4418",
+          "new_sha256": "bdb88bde736f3f50334341a3767f402572a3745438928fb64ab3e8bed01a4418"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5005,
+          "old_end": 5005,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/utility.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "48f13b0c4a62dc8865d91122e5e7c94979796eff55be34e99eec3ee07d3e7234",
+          "new_sha256": "48f13b0c4a62dc8865d91122e5e7c94979796eff55be34e99eec3ee07d3e7234"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5006,
+          "old_end": 5245,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/utility.md",
+              "start": 8,
+              "end": 247
+            }
+          ],
+          "old_sha256": "41dc15630384aacfaeafe659e536d3c6b50a774c0d8c477c0c2a67c7c68e1474",
+          "new_sha256": "41dc15630384aacfaeafe659e536d3c6b50a774c0d8c477c0c2a67c7c68e1474"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5246,
+          "old_end": 5246,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/google.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "59cf8c519fbf127853459ee1087d5aa5e377bb5f3c8b8de2b44ca183bb9b2441",
+          "new_sha256": "59cf8c519fbf127853459ee1087d5aa5e377bb5f3c8b8de2b44ca183bb9b2441"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5247,
+          "old_end": 5496,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/google.md",
+              "start": 8,
+              "end": 257
+            }
+          ],
+          "old_sha256": "0c98429d6ac8a233e82f9c8bddc11a3d8d76e3c2ece85e9ad39f62f82180b146",
+          "new_sha256": "0c98429d6ac8a233e82f9c8bddc11a3d8d76e3c2ece85e9ad39f62f82180b146"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5497,
+          "old_end": 5497,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/secretary.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "23985b704f985d2316bb81265bd49c96dcc4a27124cc4bce449dadc8e0d38af0",
+          "new_sha256": "23985b704f985d2316bb81265bd49c96dcc4a27124cc4bce449dadc8e0d38af0"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5498,
+          "old_end": 5725,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/secretary.md",
+              "start": 8,
+              "end": 235
+            }
+          ],
+          "old_sha256": "569c1cfa17380bcab1624a4d221c656c48ffa8abc9ed0800cfec0aa34192eb39",
+          "new_sha256": "569c1cfa17380bcab1624a4d221c656c48ffa8abc9ed0800cfec0aa34192eb39"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5726,
+          "old_end": 5726,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/bot.md",
+              "start": 3,
+              "end": 3
+            }
+          ],
+          "old_sha256": "391943ec5f5c10ecb0c41c42732bcc98c54ae6d470a55462250c301805e1e25a",
+          "new_sha256": "391943ec5f5c10ecb0c41c42732bcc98c54ae6d470a55462250c301805e1e25a"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5727,
+          "old_end": 5779,
+          "destinations": [
+            {
+              "path": "docs/intents/rules/bot.md",
+              "start": 8,
+              "end": 60
+            }
+          ],
+          "old_sha256": "aa63a4398d12aff42a7f17210777c3bcbc93d48cc6a7d014b2ffe553a9dcebd5",
+          "new_sha256": "aa63a4398d12aff42a7f17210777c3bcbc93d48cc6a7d014b2ffe553a9dcebd5"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5780,
+          "old_end": 5788,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 129,
+              "end": 137
+            }
+          ],
+          "old_sha256": "28a2a4b049c31357826868a11fd21e4408bb8bfff9d0374b754f813ae8c4838f",
+          "new_sha256": "28a2a4b049c31357826868a11fd21e4408bb8bfff9d0374b754f813ae8c4838f"
+        },
+        {
+          "tag": "equal",
+          "old_start": 5856,
+          "old_end": 5961,
+          "destinations": [
+            {
+              "path": "docs/intents/README.md",
+              "start": 205,
+              "end": 310
+            }
+          ],
+          "old_sha256": "e923da240dc8d1640a0b248c654ba19822c2ce7a8b3a1f5e86c288f419092f22",
+          "new_sha256": "e923da240dc8d1640a0b248c654ba19822c2ce7a8b3a1f5e86c288f419092f22"
+        }
+      ],
+      "bare_concatenation_identical": false
+    },
+    "readme_ordered_line_ranges_after_only_listed_retargets": [
+      {
+        "original_start": 1,
+        "original_end": 47,
+        "destination_start": 1,
+        "destination_end": 47
+      },
+      {
+        "original_start": 48,
+        "original_end": 108,
+        "destination_start": 50,
+        "destination_end": 110
+      },
+      {
+        "original_start": 109,
+        "original_end": 110,
+        "destination_start": 131,
+        "destination_end": 132
+      },
+      {
+        "original_start": 111,
+        "original_end": 731,
+        "destination_start": 137,
+        "destination_end": 757
+      },
+      {
+        "original_start": 732,
+        "original_end": 733,
+        "destination_start": 761,
+        "destination_end": 762
+      },
+      {
+        "original_start": 734,
+        "original_end": 1068,
+        "destination_start": 767,
+        "destination_end": 1101
+      },
+      {
+        "original_start": 1069,
+        "original_end": 1070,
+        "destination_start": 1105,
+        "destination_end": 1106
+      },
+      {
+        "original_start": 1071,
+        "original_end": 2036,
+        "destination_start": 1111,
+        "destination_end": 2076
+      },
+      {
+        "original_start": 2037,
+        "original_end": 2525,
+        "destination_start": 2086,
+        "destination_end": 2574
+      },
+      {
+        "original_start": 2526,
+        "original_end": 2527,
+        "destination_start": 2578,
+        "destination_end": 2579
+      },
+      {
+        "original_start": 2528,
+        "original_end": 3124,
+        "destination_start": 2584,
+        "destination_end": 3180
+      },
+      {
+        "original_start": 3125,
+        "original_end": 3126,
+        "destination_start": 3184,
+        "destination_end": 3185
+      },
+      {
+        "original_start": 3127,
+        "original_end": 3427,
+        "destination_start": 3190,
+        "destination_end": 3490
+      },
+      {
+        "original_start": 3428,
+        "original_end": 3429,
+        "destination_start": 3494,
+        "destination_end": 3495
+      },
+      {
+        "original_start": 3430,
+        "original_end": 4101,
+        "destination_start": 3500,
+        "destination_end": 4171
+      },
+      {
+        "original_start": 4102,
+        "original_end": 4103,
+        "destination_start": 4175,
+        "destination_end": 4176
+      },
+      {
+        "original_start": 4104,
+        "original_end": 4763,
+        "destination_start": 4181,
+        "destination_end": 4840
+      },
+      {
+        "original_start": 4764,
+        "original_end": 4765,
+        "destination_start": 4844,
+        "destination_end": 4845
+      },
+      {
+        "original_start": 4766,
+        "original_end": 4928,
+        "destination_start": 4850,
+        "destination_end": 5012
+      },
+      {
+        "original_start": 4929,
+        "original_end": 4930,
+        "destination_start": 5016,
+        "destination_end": 5017
+      },
+      {
+        "original_start": 4931,
+        "original_end": 5004,
+        "destination_start": 5022,
+        "destination_end": 5095
+      },
+      {
+        "original_start": 5005,
+        "original_end": 5006,
+        "destination_start": 5099,
+        "destination_end": 5100
+      },
+      {
+        "original_start": 5007,
+        "original_end": 5245,
+        "destination_start": 5105,
+        "destination_end": 5343
+      },
+      {
+        "original_start": 5246,
+        "original_end": 5247,
+        "destination_start": 5347,
+        "destination_end": 5348
+      },
+      {
+        "original_start": 5248,
+        "original_end": 5496,
+        "destination_start": 5353,
+        "destination_end": 5601
+      },
+      {
+        "original_start": 5497,
+        "original_end": 5498,
+        "destination_start": 5605,
+        "destination_end": 5606
+      },
+      {
+        "original_start": 5499,
+        "original_end": 5725,
+        "destination_start": 5611,
+        "destination_end": 5837
+      },
+      {
+        "original_start": 5726,
+        "original_end": 5727,
+        "destination_start": 5841,
+        "destination_end": 5842
+      },
+      {
+        "original_start": 5728,
+        "original_end": 5779,
+        "destination_start": 5847,
+        "destination_end": 5898
+      },
+      {
+        "original_start": 5780,
+        "original_end": 5961,
+        "destination_start": 5900,
+        "destination_end": 6081
+      }
+    ],
+    "html_replacements": [
+      {
+        "original": {
+          "first_line": 1,
+          "last_line": 46,
+          "first_byte": 203,
+          "end_byte": 3142,
+          "bytes": 2939,
+          "sha256": "c5ceb1fec00eca8691edeff7728cc978e2603425d69b332c7d32d90361afa575"
+        },
+        "new": "<link rel=\"stylesheet\" href=\"index.css\">"
+      },
+      {
+        "original": {
+          "first_line": 3312,
+          "last_line": 3339,
+          "first_byte": 435595,
+          "end_byte": 436651,
+          "bytes": 1056,
+          "sha256": "563e7b973180a4252daee68538885d81e959fb9b4d10cc1ca9469419ad8e93bf"
+        },
+        "new": "<script src=\"index.js\"></script>"
+      },
+      {
+        "original": {
+          "first_line": 138,
+          "last_line": 171,
+          "first_byte": 46745,
+          "end_byte": 47846,
+          "bytes": 1101,
+          "sha256": "f8bb5f56d3b29b8ba9060919ef296b556ce9e97ee275a10b83dc38fbd014b44c"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.day\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 172,
+          "last_line": 220,
+          "first_byte": 52583,
+          "end_byte": 54673,
+          "bytes": 2090,
+          "sha256": "d02f3485d461b2e4fbc7ef9667168d93711c99bbff03bb012ec5aa349e63d66d"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.period\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 221,
+          "last_line": 246,
+          "first_byte": 57673,
+          "end_byte": 58370,
+          "bytes": 697,
+          "sha256": "091837875413d08bcaad25b43aa01a8c342f6c61ca465224be4ac561c83acd9e"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.upcoming\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 247,
+          "last_line": 269,
+          "first_byte": 61151,
+          "end_byte": 61665,
+          "bytes": 514,
+          "sha256": "281f024846ea2085806c6587449916b0d5dc20e7433dfa4fd0236e8923d0ffbd"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.search\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 270,
+          "last_line": 329,
+          "first_byte": 65556,
+          "end_byte": 68037,
+          "bytes": 2481,
+          "sha256": "fa3b1fc0c4c80ff372faee29f8c4093b9baa1b27091c7e7b549d0f140c920e81"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.count\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 330,
+          "last_line": 397,
+          "first_byte": 73729,
+          "end_byte": 76586,
+          "bytes": 2857,
+          "sha256": "ebf5ae5df2e70c73c1824bfbca016268856c65bebf51a3459e14fded2d369931"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.calendar.image\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 398,
+          "last_line": 426,
+          "first_byte": 79580,
+          "end_byte": 80348,
+          "bytes": 768,
+          "sha256": "76cf13930ddc1d5871a47297767f22b23cf8e66750ddef5a7282cb68962564a8"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/calendar.html#basis.holidays.upcoming\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 427,
+          "last_line": 460,
+          "first_byte": 84374,
+          "end_byte": 85469,
+          "bytes": 1095,
+          "sha256": "b09c5524eaca773df05a98611957c9020a4e12257b1f8832027b35b360733297"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.day\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 480,
+          "last_line": 569,
+          "first_byte": 91021,
+          "end_byte": 94530,
+          "bytes": 3509,
+          "sha256": "248e4286621b5df47785f5a30627baef340b1fd46d20edb43b08f1f9692eb3b2"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.week\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 571,
+          "last_line": 631,
+          "first_byte": 99540,
+          "end_byte": 101716,
+          "bytes": 2176,
+          "sha256": "d0078aea464f85ad44795868bcfb5b96a4ccc48edaa206698c539456d0463b82"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/slots.html#basis.slots.check_time\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 633,
+          "last_line": 735,
+          "first_byte": 108428,
+          "end_byte": 112336,
+          "bytes": 3908,
+          "sha256": "73910508f76b490642b686e56fd735682e73d2c5ff860a3c88f4a73a6481c7d2"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.create\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 737,
+          "last_line": 803,
+          "first_byte": 116246,
+          "end_byte": 118711,
+          "bytes": 2465,
+          "sha256": "0a0ed2fe4df2d87cbd65d4389c53fc5a08523001f7968e5ac4360745a5690e2d"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.show\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 805,
+          "last_line": 935,
+          "first_byte": 126302,
+          "end_byte": 132122,
+          "bytes": 5820,
+          "sha256": "8176af90458e52a6140d3e06117978caace1833b903d53099b22bf60676df2a9"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.reschedule\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 937,
+          "last_line": 1041,
+          "first_byte": 137260,
+          "end_byte": 141524,
+          "bytes": 4264,
+          "sha256": "373237fda002c1839f0e01cea022aa95f3ce4545d0d3283d7426b5ba65380b41"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.rename\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1043,
+          "last_line": 1168,
+          "first_byte": 148049,
+          "end_byte": 153207,
+          "bytes": 5158,
+          "sha256": "d41d2e3592496b5c6f7fd8d6b0a10e2a7c33a129c5b52c8e3e8051348cd04c5e"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.set_detail\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1170,
+          "last_line": 1268,
+          "first_byte": 158478,
+          "end_byte": 162545,
+          "bytes": 4067,
+          "sha256": "db90e470b380b97188469b0450679864303219030c3afc3d6fe623a2939284c9"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-1.html#basis.event.delete\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1270,
+          "last_line": 1395,
+          "first_byte": 168717,
+          "end_byte": 173625,
+          "bytes": 4908,
+          "sha256": "37653dcd396cfe2ce3b771cb5acfa0df849acd6d8686a15511461738a43c669e"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.snooze\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1397,
+          "last_line": 1501,
+          "first_byte": 178954,
+          "end_byte": 183476,
+          "bytes": 4522,
+          "sha256": "694fc7e8b7c2c59e0dd6faf591389f015cd71d5c239d3eef59f4d7ff569059a4"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.hide\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1502,
+          "last_line": 1590,
+          "first_byte": 188939,
+          "end_byte": 192268,
+          "bytes": 3329,
+          "sha256": "0fe7c2cf89d835f954c5b57b2e483723b081ebd769246d25d356d0f934264929"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/events-2.html#basis.event.create_range\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1592,
+          "last_line": 1719,
+          "first_byte": 198777,
+          "end_byte": 203848,
+          "bytes": 5071,
+          "sha256": "41558e94f2f6e6bd2d14999308cf916394563318c3fdb96ab1185a9b147c2d56"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.set\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1721,
+          "last_line": 1794,
+          "first_byte": 208487,
+          "end_byte": 211174,
+          "bytes": 2687,
+          "sha256": "85c42f9fe3bdef8f78922f31f1542ef5ddc8a4a94070a2f92343a964f38bc11a"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1796,
+          "last_line": 1895,
+          "first_byte": 216380,
+          "end_byte": 220476,
+          "bytes": 4096,
+          "sha256": "5540e2de80a7f3bee7034bc0a3195f3f2b6e6c94e3d314ecbe9c2815dc5bb2fb"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.clear\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1896,
+          "last_line": 1978,
+          "first_byte": 225215,
+          "end_byte": 228229,
+          "bytes": 3014,
+          "sha256": "a7f64ab4c77000cb2f30f2b7ece95be74b9bab76530f5a77b8d82d7f909f26db"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/reminders.html#basis.reminder.after\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 1980,
+          "last_line": 2097,
+          "first_byte": 234465,
+          "end_byte": 239474,
+          "bytes": 5009,
+          "sha256": "86b94d2de36f3103a9adf8896978288bc9d26a86aac4b0c42924c6777645c887"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/invitations.html#basis.invite.send\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2099,
+          "last_line": 2176,
+          "first_byte": 244032,
+          "end_byte": 247059,
+          "bytes": 3027,
+          "sha256": "95ae5ce4683155a3ef360264b7c07c60c0e674023da3ff0433f91e4b40991490"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/invitations.html#basis.invite.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2177,
+          "last_line": 2197,
+          "first_byte": 249695,
+          "end_byte": 250335,
+          "bytes": 640,
+          "sha256": "c48728d5f0f926c95d8cb2fb7802c70d0dfeee54fcaf27129c07b4bb7bb0b795"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2198,
+          "last_line": 2227,
+          "first_byte": 252836,
+          "end_byte": 253702,
+          "bytes": 866,
+          "sha256": "7a80bd851bbd9af04be7a98fae5db0966fcd4416943a1e1d14cf928b2821346f"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.find\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2228,
+          "last_line": 2273,
+          "first_byte": 257152,
+          "end_byte": 258609,
+          "bytes": 1457,
+          "sha256": "937518abc0cb36aca3835178dfebaf6f4c52752ed2cdea370fd566682d98379d"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.add\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2275,
+          "last_line": 2346,
+          "first_byte": 262536,
+          "end_byte": 265228,
+          "bytes": 2692,
+          "sha256": "421d46a95ef530fd88b2c2a24432cf14c3312324a808d86a2a7af5ee2792a9e7"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.rename\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2348,
+          "last_line": 2419,
+          "first_byte": 269171,
+          "end_byte": 271848,
+          "bytes": 2677,
+          "sha256": "01be5944c8740cea4129aeb0236a433aacafed42f91cccf7a8da53c85b99c82b"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.set_username\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2421,
+          "last_line": 2486,
+          "first_byte": 275386,
+          "end_byte": 277991,
+          "bytes": 2605,
+          "sha256": "8d3ee0fce3a1c480c2274c862077fc69ad32d1c2f8d00229eed560ec90df77fb"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.contacts.delete\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2487,
+          "last_line": 2534,
+          "first_byte": 280778,
+          "end_byte": 282748,
+          "bytes": 1970,
+          "sha256": "9c17fa2a3969cf3574a61ffdb6f9436d12b6cd164ffa56ab2bce357b366daeb2"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/contacts.html#basis.call.start\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2535,
+          "last_line": 2584,
+          "first_byte": 286097,
+          "end_byte": 287851,
+          "bytes": 1754,
+          "sha256": "72838ab89db3a709bb6c4ca7c11eb7a998afb58c5420aec0cca7ecdae5b39226"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.view\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2585,
+          "last_line": 2681,
+          "first_byte": 294181,
+          "end_byte": 297800,
+          "bytes": 3619,
+          "sha256": "2a437bab8acf4fc0afbbac76db3da740c51f9f440e2e7326720d1adac30b9f83"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.toggle\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2682,
+          "last_line": 2739,
+          "first_byte": 301494,
+          "end_byte": 303554,
+          "bytes": 2060,
+          "sha256": "b6ff532a6b46239e259a81815a5a13930ba58209a35483bf5d2828e77304eaab"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.agenda_time\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2740,
+          "last_line": 2794,
+          "first_byte": 308051,
+          "end_byte": 309738,
+          "bytes": 1687,
+          "sha256": "328f10b60242ee36a49ae4b627878c3af6ee02fe99d012b0ff6758d7861d4711"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.duration\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2795,
+          "last_line": 2850,
+          "first_byte": 312703,
+          "end_byte": 314568,
+          "bytes": 1865,
+          "sha256": "a1acf3a32dab5b0876fefe1141d0407c0ce12a6f72531cf7c82614d6af2d47c3"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.language\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2851,
+          "last_line": 2906,
+          "first_byte": 318197,
+          "end_byte": 320281,
+          "bytes": 2084,
+          "sha256": "462bfa693b3a328735e07315faf55a8880fc5005da673323543eac7ec0a18d0e"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/settings.html#basis.settings.timezone\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2907,
+          "last_line": 2947,
+          "first_byte": 323408,
+          "end_byte": 324649,
+          "bytes": 1241,
+          "sha256": "7b4851b5fd6bdba976eefe53f0a8b8d2290de3124cbf3beada3a4e060a36a50a"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/history.html#basis.history.search\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2948,
+          "last_line": 2980,
+          "first_byte": 327447,
+          "end_byte": 328442,
+          "bytes": 995,
+          "sha256": "d07fabd311c45794b0a04914a5ba76e6aefcc7b61c2adc69f73927f03140ebc5"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/history.html#basis.actionlog.recent\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 2981,
+          "last_line": 3011,
+          "first_byte": 331101,
+          "end_byte": 332029,
+          "bytes": 928,
+          "sha256": "da8f2e12bc434d5cb9534776780bff1e6960fec49224482cf57addcf28453c20"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/memory.html#basis.memory.remember\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3012,
+          "last_line": 3043,
+          "first_byte": 335394,
+          "end_byte": 336250,
+          "bytes": 856,
+          "sha256": "9ee03980cabc64badb99f35ca9e983277eba9f07474cc71beb220cebd7b38ab3"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.time.now\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3044,
+          "last_line": 3089,
+          "first_byte": 340115,
+          "end_byte": 341388,
+          "bytes": 1273,
+          "sha256": "fad3be63dc1aed79291fd180508038b6ba21507201c6ae0e77695ab0973f351f"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.time.convert\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3090,
+          "last_line": 3111,
+          "first_byte": 343556,
+          "end_byte": 344023,
+          "bytes": 467,
+          "sha256": "e3f1dd31388f9820177ae4af846fe13b9996b5ea9ab99a3dfccdf1a325f5ce90"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/utility.html#basis.calc.evaluate\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3112,
+          "last_line": 3132,
+          "first_byte": 347418,
+          "end_byte": 348072,
+          "bytes": 654,
+          "sha256": "4b12fe514643ad4597fec5d0f2c685c7a25803d23e82f425ae579bfd9823f0a2"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3133,
+          "last_line": 3153,
+          "first_byte": 350782,
+          "end_byte": 351431,
+          "bytes": 649,
+          "sha256": "3de9f6d9450f0d3c888fac23fc1f1d4005fcb75762dbcda59b3b353f7fe17da4"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.calendars\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3154,
+          "last_line": 3169,
+          "first_byte": 355584,
+          "end_byte": 356313,
+          "bytes": 729,
+          "sha256": "980d235ff466cb599f2c4d59bed58535ace0d04eaf1af2e86654ca3bc29070f3"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.google.connect_help\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3172,
+          "last_line": 3198,
+          "first_byte": 359942,
+          "end_byte": 361171,
+          "bytes": 1229,
+          "sha256": "47876580435b1bfc27848ebd474fd7060de4c7a8dd47b7ab0da4e49edce5ca51"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/google.html#basis.telegram.status\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3199,
+          "last_line": 3219,
+          "first_byte": 363736,
+          "end_byte": 364384,
+          "bytes": 648,
+          "sha256": "c9bf15231544d87bf59fe5102a4aa285b996b831796dcc3d506a630add8a2d37"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.list\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3220,
+          "last_line": 3283,
+          "first_byte": 369367,
+          "end_byte": 371929,
+          "bytes": 2562,
+          "sha256": "ccc10689222f3f74beb8699a379bfea8f14d628e2cb21b350ecd2d6f65b3a206"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.invite\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3284,
+          "last_line": 3299,
+          "first_byte": 375064,
+          "end_byte": 375863,
+          "bytes": 799,
+          "sha256": "04f1e01cb408abd95f43b026b50df788ad72bf787c6dd1fd9c36466fedfbd025"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/secretary.html#basis.secretary.clarify\">Full workflow (JSON)</a></p>"
+      },
+      {
+        "original": {
+          "first_line": 3300,
+          "last_line": 3312,
+          "first_byte": 379082,
+          "end_byte": 379313,
+          "bytes": 231,
+          "sha256": "ce2dedf8c757711571f1739a0ca1c5e1ace26f3c281d6ac2d5741d59faf4546e"
+        },
+        "new": "<p><a class=\"workflow-link\" href=\"workflows/bot.html#basis.bot.info\">Full workflow (JSON)</a></p>"
+      }
+    ]
+  }
+}

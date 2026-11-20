@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Свободное время — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="calendar-2.html">Previous: Расписание (2/2)</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="events-1.html">Next: События (1/2)</a></nav>
+<h1>Свободное время</h1>
+<section id="basis.slots.day"><h2>Свободное время в один день</h2><p><code>basis.slots.day</code> · <a href="../index.html#basis.slots.day">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;day&quot;: {
+      &quot;type&quot;: &quot;date&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)|lower|replace(\&quot;воскресение\&quot;,\&quot;воскресенье\&quot;)}} {{$2|default(\&quot;\&quot;)}} {{$3|default(\&quot;\&quot;)}} {{$4|default(\&quot;\&quot;)}} {{$5|default(\&quot;\&quot;)}} {{$6|default(\&quot;\&quot;)}}&quot;,
+      &quot;words&quot;: {
+        &quot;сегодня&quot;: &quot;today&quot;,
+        &quot;седня&quot;: &quot;today&quot;,
+        &quot;сегодняшний день&quot;: &quot;today&quot;,
+        &quot;today&quot;: &quot;today&quot;,
+        &quot;завтра&quot;: &quot;tomorrow&quot;,
+        &quot;завтрашний день&quot;: &quot;tomorrow&quot;,
+        &quot;tomorrow&quot;: &quot;tomorrow&quot;,
+        &quot;послезавтра&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;после завтра&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;послезавтрашний день&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;day after tomorrow&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;the day after tomorrow&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;вчера&quot;: &quot;yesterday&quot;,
+        &quot;вчерашний день&quot;: &quot;yesterday&quot;,
+        &quot;yesterday&quot;: &quot;yesterday&quot;
+      },
+      &quot;future&quot;: true
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.day}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {},
+    &quot;en&quot;: {}
+  }
+}</pre>
+</section>
+<section id="basis.slots.week"><h2>Свободное время по дням недели</h2><p><code>basis.slots.week</code> · <a href="../index.html#basis.slots.week">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;p&quot;: {
+      &quot;type&quot;: &quot;period&quot;,
+      &quot;from&quot;: &quot;{{$1}}&quot;,
+      &quot;values&quot;: {
+        &quot;на этой неделе&quot;: &quot;week&quot;,
+        &quot;на неделе&quot;: &quot;week&quot;,
+        &quot;на эту неделю&quot;: &quot;week&quot;,
+        &quot;на текущую неделю&quot;: &quot;week&quot;,
+        &quot;на текущей неделе&quot;: &quot;week&quot;,
+        &quot;this coming week&quot;: &quot;week&quot;,
+        &quot;the coming week&quot;: &quot;week&quot;,
+        &quot;на неделю&quot;: &quot;week&quot;,
+        &quot;на ближайшую неделю&quot;: &quot;week&quot;,
+        &quot;на ближайшие 7 дней&quot;: &quot;week&quot;,
+        &quot;на 7 дней&quot;: &quot;week&quot;,
+        &quot;на ближайшие семь дней&quot;: &quot;week&quot;,
+        &quot;эту неделю&quot;: &quot;week&quot;,
+        &quot;неделю&quot;: &quot;week&quot;,
+        &quot;this week&quot;: &quot;week&quot;,
+        &quot;my week&quot;: &quot;week&quot;,
+        &quot;the week ahead&quot;: &quot;week&quot;,
+        &quot;week ahead&quot;: &quot;week&quot;,
+        &quot;for this week&quot;: &quot;week&quot;,
+        &quot;for the week&quot;: &quot;week&quot;,
+        &quot;the week&quot;: &quot;week&quot;,
+        &quot;next 7 days&quot;: &quot;week&quot;,
+        &quot;the next 7 days&quot;: &quot;week&quot;,
+        &quot;for the next 7 days&quot;: &quot;week&quot;,
+        &quot;over the next 7 days&quot;: &quot;week&quot;,
+        &quot;на следующей неделе&quot;: &quot;next_week&quot;,
+        &quot;на следующую неделю&quot;: &quot;next_week&quot;,
+        &quot;на след неделе&quot;: &quot;next_week&quot;,
+        &quot;на след неделю&quot;: &quot;next_week&quot;,
+        &quot;следующую неделю&quot;: &quot;next_week&quot;,
+        &quot;next week&quot;: &quot;next_week&quot;,
+        &quot;for next week&quot;: &quot;next_week&quot;
+      }
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[0]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d0&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[1]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d1&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[2]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d2&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[3]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d3&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[4]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d4&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[5]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d5&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.p.days[6]}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;d6&quot;
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.week}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;week&quot;: &quot;{{bind.p.days[0]|human_day}}:\n{{tool_outputs.d0_text}}\n\n{{bind.p.days[1]|human_day}}:\n{{tool_outputs.d1_text}}\n\n{{bind.p.days[2]|human_day}}:\n{{tool_outputs.d2_text}}\n\n{{bind.p.days[3]|human_day}}:\n{{tool_outputs.d3_text}}\n\n{{bind.p.days[4]|human_day}}:\n{{tool_outputs.d4_text}}\n\n{{bind.p.days[5]|human_day}}:\n{{tool_outputs.d5_text}}\n\n{{bind.p.days[6]|human_day}}:\n{{tool_outputs.d6_text}}&quot;
+    },
+    &quot;en&quot;: {
+      &quot;week&quot;: &quot;{{bind.p.days[0]|human_day}}:\n{{tool_outputs.d0_text}}\n\n{{bind.p.days[1]|human_day}}:\n{{tool_outputs.d1_text}}\n\n{{bind.p.days[2]|human_day}}:\n{{tool_outputs.d2_text}}\n\n{{bind.p.days[3]|human_day}}:\n{{tool_outputs.d3_text}}\n\n{{bind.p.days[4]|human_day}}:\n{{tool_outputs.d4_text}}\n\n{{bind.p.days[5]|human_day}}:\n{{tool_outputs.d5_text}}\n\n{{bind.p.days[6]|human_day}}:\n{{tool_outputs.d6_text}}&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.slots.check_time"><h2>Свободен ли я в указанное время</h2><p><code>basis.slots.check_time</code> · <a href="../index.html#basis.slots.check_time">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;d&quot;: {
+      &quot;type&quot;: &quot;date&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)|lower|replace(\&quot;воскресение\&quot;,\&quot;воскресенье\&quot;)}} {{$2|default(\&quot;\&quot;)}} {{$3|default(\&quot;\&quot;)}} {{$4|default(\&quot;\&quot;)}} {{$5|default(\&quot;\&quot;)}} {{$6|default(\&quot;\&quot;)}} {{$9|default(\&quot;\&quot;)|lower|replace(\&quot;воскресение\&quot;,\&quot;воскресенье\&quot;)}} {{$10|default(\&quot;\&quot;)}} {{$11|default(\&quot;\&quot;)}} {{$12|default(\&quot;\&quot;)}} {{$13|default(\&quot;\&quot;)}} {{$14|default(\&quot;\&quot;)}}&quot;,
+      &quot;words&quot;: {
+        &quot;сегодня&quot;: &quot;today&quot;,
+        &quot;седня&quot;: &quot;today&quot;,
+        &quot;сегодняшний день&quot;: &quot;today&quot;,
+        &quot;today&quot;: &quot;today&quot;,
+        &quot;завтра&quot;: &quot;tomorrow&quot;,
+        &quot;завтрашний день&quot;: &quot;tomorrow&quot;,
+        &quot;tomorrow&quot;: &quot;tomorrow&quot;,
+        &quot;послезавтра&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;после завтра&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;послезавтрашний день&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;day after tomorrow&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;the day after tomorrow&quot;: &quot;day_after_tomorrow&quot;,
+        &quot;вчера&quot;: &quot;yesterday&quot;,
+        &quot;вчерашний день&quot;: &quot;yesterday&quot;,
+        &quot;yesterday&quot;: &quot;yesterday&quot;
+      },
+      &quot;future&quot;: true
+    },
+    &quot;at&quot;: {
+      &quot;type&quot;: &quot;time&quot;,
+      &quot;from&quot;: &quot;{{$7|default(\&quot;\&quot;)}}{{$8|default(\&quot;\&quot;)}}&quot;
+    },
+    &quot;start&quot;: {
+      &quot;type&quot;: &quot;datetime&quot;,
+      &quot;date&quot;: &quot;d&quot;,
+      &quot;time&quot;: &quot;at&quot;
+    },
+    &quot;until&quot;: {
+      &quot;type&quot;: &quot;datetime&quot;,
+      &quot;date&quot;: &quot;d&quot;,
+      &quot;time&quot;: &quot;at&quot;,
+      &quot;plus_minutes&quot;: 60
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.d}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;free&quot;
+    },
+    {
+      &quot;when&quot;: &quot;fits(free, bind.start, bind.until)&quot;,
+      &quot;respond&quot;: &quot;{{t.free}}&quot;
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.busy}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;free&quot;: &quot;Да, {{bind.start|human_when}} свободно: в {{env.scope|eq(\&quot;group\&quot;,\&quot;календаре группы\&quot;,\&quot;твоём календаре\&quot;)}} на этот час ничего не запланировано.&quot;,
+      &quot;busy&quot;: &quot;Нет, {{bind.start|human_when}} занято: в этот час уже что-то начинается или идёт. Свободные окна на этот день:\n{{tool_outputs.free_text}}&quot;
+    },
+    &quot;en&quot;: {
+      &quot;free&quot;: &quot;Yes, {{bind.start|human_when}} is free: nothing is scheduled in {{env.scope|eq(\&quot;group\&quot;,\&quot;the group calendar\&quot;,\&quot;your calendar\&quot;)}} for that hour.&quot;,
+      &quot;busy&quot;: &quot;No, {{bind.start|human_when}} is taken: something already starts or runs in that hour. Free windows that day:\n{{tool_outputs.free_text}}&quot;
+    }
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="calendar-2.html">Previous: Расписание (2/2)</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="events-1.html">Next: События (1/2)</a></nav>
+</main></body></html>

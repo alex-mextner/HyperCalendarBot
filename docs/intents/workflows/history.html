@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>История и журнал — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="settings.html">Previous: Настройки</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="memory.html">Next: Память</a></nav>
+<h1>История и журнал</h1>
+<section id="basis.history.search"><h2>Поиск по истории чата</h2><p><code>basis.history.search</code> · <a href="../index.html#basis.history.search">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;q&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;max&quot;: 100,
+      &quot;optional&quot;: true,
+      &quot;default&quot;: &quot;&quot;
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.q == &#39;&#39;&quot;,
+      &quot;call&quot;: &quot;get_history&quot;,
+      &quot;input&quot;: {
+        &quot;limit&quot;: 10
+      }
+    },
+    {
+      &quot;when&quot;: &quot;bind.q != &#39;&#39;&quot;,
+      &quot;call&quot;: &quot;get_history&quot;,
+      &quot;input&quot;: {
+        &quot;search&quot;: &quot;{{bind.q}}&quot;,
+        &quot;limit&quot;: 10
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.actionlog.recent"><h2>Что бот менял недавно</h2><p><code>basis.actionlog.recent</code> · <a href="../index.html#basis.actionlog.recent">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;limit&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;min&quot;: 1,
+      &quot;max&quot;: 30,
+      &quot;optional&quot;: true,
+      &quot;default&quot;: 10
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_action_log&quot;,
+      &quot;input&quot;: {
+        &quot;limit&quot;: &quot;{{bind.limit}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;
+    }
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="settings.html">Previous: Настройки</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="memory.html">Next: Память</a></nav>
+</main></body></html>

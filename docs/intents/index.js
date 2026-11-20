@@ -6,11 +6,6 @@
   var counter = document.getElementById('count');
   var empty = document.getElementById('empty');
   var cards = [].slice.call(document.querySelectorAll('article[data-name]'));
-  var workflows = window.INTENT_WORKFLOWS || {};
-  [].forEach.call(document.querySelectorAll('pre[data-workflow]'), function (pre) {
-    var workflow = workflows[pre.getAttribute('data-workflow')];
-    if (workflow) pre.textContent = JSON.stringify(workflow, null, 2);
-  });
   function apply() {
     var text = search.value.toLowerCase().trim();
     var shown = 0;

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Расписание (2/2) — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="calendar-1.html">Previous: Расписание (1/2)</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="slots.html">Next: Свободное время</a></nav>
+<h1>Расписание (2/2)</h1>
+<section id="basis.holidays.upcoming"><h2>Ближайшие праздники</h2><p><code>basis.holidays.upcoming</code> · <a href="../index.html#basis.holidays.upcoming">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;many&quot;: {
+      &quot;type&quot;: &quot;enum&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;values&quot;: {
+        &quot;ближайшие праздники&quot;: 5,
+        &quot;предстоящие праздники&quot;: 5,
+        &quot;какие скоро праздники&quot;: 5,
+        &quot;какие ближайшие праздники&quot;: 5,
+        &quot;какие праздники скоро&quot;: 5,
+        &quot;какие праздники впереди&quot;: 5,
+        &quot;какие предстоящие праздники&quot;: 5,
+        &quot;покажи ближайшие праздники&quot;: 5,
+        &quot;покажи праздники&quot;: 5,
+        &quot;upcoming holidays&quot;: 5,
+        &quot;next holidays&quot;: 5,
+        &quot;upcoming public holidays&quot;: 5,
+        &quot;show upcoming holidays&quot;: 5,
+        &quot;show holidays&quot;: 5,
+        &quot;what holidays are coming up&quot;: 5,
+        &quot;what holidays are upcoming&quot;: 5,
+        &quot;what are the upcoming holidays&quot;: 5,
+        &quot;когда ближайшие праздники&quot;: 5,
+        &quot;какие праздники в ближайшее время&quot;: 5,
+        &quot;какие скоро будут праздники&quot;: 5,
+        &quot;покажи предстоящие праздники&quot;: 5,
+        &quot;скажи ближайшие праздники&quot;: 5,
+        &quot;show me upcoming holidays&quot;: 5,
+        &quot;any upcoming holidays&quot;: 5,
+        &quot;any holidays coming up&quot;: 5,
+        &quot;what holidays are coming&quot;: 5,
+        &quot;upcoming holiday&quot;: 5
+      },
+      &quot;optional&quot;: true,
+      &quot;default&quot;: 1
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;get_holidays&quot;,
+      &quot;input&quot;: {
+        &quot;limit&quot;: &quot;{{bind.many}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {},
+    &quot;en&quot;: {}
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="calendar-1.html">Previous: Расписание (1/2)</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="slots.html">Next: Свободное время</a></nav>
+</main></body></html>

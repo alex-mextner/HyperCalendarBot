@@ -38,8 +38,8 @@ ci:
       gh_alias: true
 
 # cccc complexity + file-length gate (`rig lint check`). Explicit here so the repo's thresholds
-# are visible; they equal the global defaults. Only .json is exempt from the line limit, so the
-# generated uv.lock (1343 lines) stays a standing warning by design: do not exempt `lock`.
+# are visible; they equal the global defaults. Only .json is exempt from the line limit.
+# Generated locks, including the universal requirements.lock, remain measured.
 lint_checks:
   enabled: true
   complexity:
