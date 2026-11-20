@@ -42,6 +42,11 @@ class Teardown(StageWorld):
         result = self.finish(process)
         self.assertLess(time.monotonic() - started, 40)
         self.assertOutcome(result, 1, "failed")
+        # A watchdog interrupt inside read must still emit exactly one final result.
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [f"STAGE_QA_RESULT status=failed sha={SHA} cases=0 failed=0"],
+        )
         self.assertIn("timed out", result.stderr)
         self.assertTrue(self.has_event("evidence failed"))
         self.assertTornDown()

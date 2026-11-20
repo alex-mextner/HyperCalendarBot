@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Память — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="history.html">Previous: История и журнал</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="utility.html">Next: Время и вычисления</a></nav>
+<h1>Память</h1>
+<section id="basis.memory.remember"><h2>Запомнить факт по явной просьбе</h2><p><code>basis.memory.remember</code> · <a href="../index.html#basis.memory.remember">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;fact&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$1}}&quot;,
+      &quot;max&quot;: 300
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;remember_user_fact&quot;,
+      &quot;input&quot;: {
+        &quot;type&quot;: &quot;append&quot;,
+        &quot;content&quot;: &quot;{{bind.fact}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;
+    }
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="history.html">Previous: История и журнал</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="utility.html">Next: Время и вычисления</a></nav>
+</main></body></html>

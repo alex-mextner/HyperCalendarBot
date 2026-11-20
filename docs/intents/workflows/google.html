@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google Календарь — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="utility.html">Previous: Время и вычисления</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="secretary.html">Next: Доступ помощников</a></nav>
+<h1>Google Календарь</h1>
+<section id="basis.google.status"><h2>Подключён ли Google Календарь</h2><p><code>basis.google.status</code> · <a href="../index.html#basis.google.status">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;get_google_calendar_status&quot;,
+      &quot;input&quot;: {}
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.google.calendars"><h2>Список моих календарей Google</h2><p><code>basis.google.calendars</code> · <a href="../index.html#basis.google.calendars">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;list_google_calendars&quot;,
+      &quot;input&quot;: {}
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.google.connect_help"><h2>Как подключить, переподключить или отключить Google Календарь</h2><p><code>basis.google.connect_help</code> · <a href="../index.html#basis.google.connect_help">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;steps&quot;: [
+    {
+      &quot;respond&quot;: &quot;{{t.help}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;help&quot;: &quot;Google Calendar подключается командой /connect_google, отключается командой /disconnect_google — обе работают в личке с ботом. По фразе в чате я ничего не отключаю.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;help&quot;: &quot;Google Calendar is connected with /connect_google and disconnected with /disconnect_google — both work in a private chat with the bot. I do not disconnect anything from a chat phrase.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.telegram.status"><h2>Статус подключённого личного Telegram</h2><p><code>basis.telegram.status</code> · <a href="../index.html#basis.telegram.status">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;group.is_group == true&quot;,
+      &quot;respond&quot;: &quot;{{t.private_only}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;connect_telegram_status&quot;,
+      &quot;input&quot;: {},
+      &quot;as&quot;: &quot;connection&quot;
+    },
+    {
+      &quot;respond&quot;: &quot;{{tool_outputs.connection_text}}\n\n{{t.connect_help}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;private_only&quot;: &quot;Это личные данные — работаю с ними только в личке с ботом.&quot;,
+      &quot;connect_help&quot;: &quot;Для подключения вашего аккаунта откройте /connect_telegram в личном чате с ботом. Сам статус подключения ничего не меняет.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;private_only&quot;: &quot;This is private data — I only handle it in a private chat with the bot.&quot;,
+      &quot;connect_help&quot;: &quot;To connect your account, open /connect_telegram in this private bot chat. Reading the status does not change the connection.&quot;
+    }
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="utility.html">Previous: Время и вычисления</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="secretary.html">Next: Доступ помощников</a></nav>
+</main></body></html>

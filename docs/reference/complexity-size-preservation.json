@@ -1,0 +1,338 @@
+{
+  "schema": "gh860-preservation/v2",
+  "baseline_sha": "2327f650f56b09fbb1362891349411af59d1562d",
+  "split_sha": "0bdc82291b2241b07279814be389b537c1618887",
+  "candidate_base_sha": "bb7a9d4765e406b3c2c258fc4ad55445643857ac",
+  "scope": "Metadata records raw byte hashes and line/byte positions. Original document bodies remain in their readable Markdown and HTML files; no body is moved into this evidence JSON. Current paths and later feature changes are separate from the same-input original-model proof.",
+  "source_export_sha256": "d3ac324a76d6cd5fa17ab89fbbeb0d25f1a6118b8da6fc7fbac52593337dce5d",
+  "current_plan_spec_files": [
+    {
+      "path": "docs/plans/2026-03-12-parser-recurrence-holidays.md",
+      "sha256": "0aeb5523bcb8c7a48b9adf8d75d9125b87b99b83f0e72e363c2f1bf86b06a9b7"
+    },
+    {
+      "path": "docs/plans/2026-03-12-parser-recurrence-holidays/01-tasks-1-4.md",
+      "sha256": "3c3c3ec0ac75c1039717bd86c9f6bce003e3a50bf641312f41cdaecbf5987ff8"
+    },
+    {
+      "path": "docs/plans/2026-03-12-parser-recurrence-holidays/02-tasks-5-10.md",
+      "sha256": "19ac3cdbb2a1794d456f38192783b94cce994183f0d7305fe5d87bf04af1156e"
+    },
+    {
+      "path": "docs/plans/2026-03-12-parser-recurrence-holidays/03-tasks-11-13.md",
+      "sha256": "9d1365691c7b317ef26ab3ddc7418f405f0cefd22bb2d0f07c0cb0db9e8fba5b"
+    },
+    {
+      "path": "docs/plans/2026-03-12-parser-recurrence-holidays/04-tasks-14-16.md",
+      "sha256": "ea5539a8a7c91f1732b1280ebc77a2dad2fb6efb62d6261a9f1fe16615a5c08a"
+    },
+    {
+      "path": "docs/plans/2026-03-13-ai-agent.md",
+      "sha256": "548f6bb609fb3675bdf06317e139413b7832c3e37624243a68bd0c42a78b34a5"
+    },
+    {
+      "path": "docs/plans/2026-03-13-ai-agent/01-tasks-1-6.md",
+      "sha256": "25617a91dfb4ae273da5b361e99a0d1afc3a56c4ba5b25bd93fe8d795ee86486"
+    },
+    {
+      "path": "docs/plans/2026-03-13-ai-agent/02-tasks-7-8.md",
+      "sha256": "afda1dcf771296ca045e1f8181260f5c7b699ee6c1501a6f72584b74e74be1f7"
+    },
+    {
+      "path": "docs/plans/2026-03-13-ai-agent/03-tasks-9-11.md",
+      "sha256": "1b6b4fc5dae083a9b558d8f0c98e46262690821aaae9432b764eaf8b6e65bd1a"
+    },
+    {
+      "path": "docs/plans/2026-03-13-ai-agent/04-tasks-12-16.md",
+      "sha256": "d3ea6acc2b0d75e53d0c23a24c1a5785ee22b961e3f6d075784cd57be3f4f5e0"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync.md",
+      "sha256": "7d1f3a7ebc04d83943816eb64f515cfdcbc16e9b3120dce79b202bf6b81ccd03"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync/01-overview-tasks-1-4.md",
+      "sha256": "591f35f81647c532e703f2273d982ed92dfd1febc1997c94442113722fa5ec2e"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync/02-tasks-5-7.md",
+      "sha256": "ab386d860aea55bbb37cff5da9a48957a3f4f0e809c7962dd9cae6e592658c97"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync/03-tasks-8-11.md",
+      "sha256": "c15455e95771cd710698e3d1841912738a01a1ab0f0409c4d352c33638b31793"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync/04-tasks-12-15.md",
+      "sha256": "7971883b31504a32e0f84ac9e50e0d9e1206d11e51361b8831043835e95844c6"
+    },
+    {
+      "path": "docs/plans/2026-03-13-google-calendar-sync/05-tasks-16-24.md",
+      "sha256": "784468308534009b147fdaa777e9596f98d88b0c334f871e2804923825185368"
+    },
+    {
+      "path": "docs/plans/2026-03-13-image-generation.md",
+      "sha256": "805b3c4376b9899abf36359cfda53ce15bf9086c7dd1df1e111fd7e42fa9bfdc"
+    },
+    {
+      "path": "docs/plans/2026-03-13-image-generation/01-overview-tasks-1-5.md",
+      "sha256": "d1c47edea264307d96eb93c534a35824a590f9f4a1fbe3ce09290caf4a84b97c"
+    },
+    {
+      "path": "docs/plans/2026-03-13-image-generation/02-tasks-6-11.md",
+      "sha256": "28c1e3fec7c43507838ed86bcbc16e3be393ec4fdc403994128b25bcab4da969"
+    },
+    {
+      "path": "docs/plans/2026-03-13-image-generation/03-tasks-12-17.md",
+      "sha256": "86a14cc50602b8f9d0e47a9c9e3994ae8ad8bdc2f431af4a3e7e6726f9956c59"
+    },
+    {
+      "path": "docs/plans/2026-03-13-notifications.md",
+      "sha256": "d85b67def1b213607921cd38ed85e0fc1066080a4add3e2db86f58697e5487ff"
+    },
+    {
+      "path": "docs/plans/2026-03-13-notifications/01-tasks-1-5.md",
+      "sha256": "a94675ab7d8d097caa5c8f566c5c5132582e824726f323e6c6d20ebceafe8be1"
+    },
+    {
+      "path": "docs/plans/2026-03-13-notifications/02-tasks-6-9.md",
+      "sha256": "2772d2b1d99bf3a34a567ce33dd85e10555eb86cf0b1a0f5a6d192efde9901b6"
+    },
+    {
+      "path": "docs/plans/2026-03-13-notifications/03-tasks-10-12.md",
+      "sha256": "2518136427c70c003f605f8264b50eb168380cfe3d5ece2a172a531a5da3ebaf"
+    },
+    {
+      "path": "docs/plans/2026-03-13-notifications/04-tasks-13-17.md",
+      "sha256": "15ed0d4515eeb7021be40895b64f91b7f10a6a7708da8cab9e528bf573d0142f"
+    },
+    {
+      "path": "docs/plans/2026-03-16-voice-call-reminders.md",
+      "sha256": "0b92f2dccb52a34fb26e2cd9d138d32e7c3f8ec28b269892888a531eec3f8781"
+    },
+    {
+      "path": "docs/plans/2026-03-16-voice-call-reminders/01-overview-tasks-1-4.md",
+      "sha256": "1e3cd5ac0f152426e126029b8667940aa7a0a18ae1ef5dc37aa3c0ccdf1ba568"
+    },
+    {
+      "path": "docs/plans/2026-03-16-voice-call-reminders/02-tasks-5-6.md",
+      "sha256": "16d96b2fec83ef3f59a5154f1df404fb423a71a04c02fcec0bc0e960e7cd3359"
+    },
+    {
+      "path": "docs/plans/2026-03-16-voice-call-reminders/03-tasks-7-12.md",
+      "sha256": "b8125b2da51dbf7dc99c7f158946af129be07f9b6c6d5b87dc7e910a50cfdd1f"
+    },
+    {
+      "path": "docs/plans/2026-03-17-bot-ux-automation.md",
+      "sha256": "2bb5916c6c3964d5ff968476468b732ede1d2227fe7e7f6b3e8f17786727d856"
+    },
+    {
+      "path": "docs/plans/2026-03-17-bot-ux-automation/01-tasks-1-9.md",
+      "sha256": "ebb776089c5704eddb3f0b901a03a04261db7705cb9955994f7f9f0d9096dddb"
+    },
+    {
+      "path": "docs/plans/2026-03-17-bot-ux-automation/02-tasks-10-20.md",
+      "sha256": "ff8fe4e497a7ff0948470a2ca9a3de0571be30dd7d6392dd028877b4b9607f1b"
+    },
+    {
+      "path": "docs/plans/2026-03-17-group-chat-interaction.md",
+      "sha256": "4fd22fb44c9721d2b46178f3baba3c47633785921ee4aef4e76a5de63320493a"
+    },
+    {
+      "path": "docs/plans/2026-03-17-group-chat-interaction/01-tasks-1-6.md",
+      "sha256": "54f6f4dc49d969f3ab64dcbe5a7c6c0252df4523750b8eb3903991bf75d93004"
+    },
+    {
+      "path": "docs/plans/2026-03-17-group-chat-interaction/02-tasks-7-18.md",
+      "sha256": "4c0e1d5c254741baef3e61e9a02d793d077ec0f0362232301446fb26c86cc184"
+    },
+    {
+      "path": "docs/plans/2026-03-18-group-commands.md",
+      "sha256": "0c1e636ec59796ad502adba3635c03ba9d4c4b597fa01d9bcc3961ca85458165"
+    },
+    {
+      "path": "docs/plans/2026-03-18-group-commands/01-overview-tasks-1-5.md",
+      "sha256": "3f2a8e6dbaa0aeb7e134903bdc773279a7aaa6096db5f4ad8d6adb9e7793c899"
+    },
+    {
+      "path": "docs/plans/2026-03-18-group-commands/02-tasks-6-12.md",
+      "sha256": "0ff768399c08433328c31aa455c74513b4a083074a20c55f33f0b055ffdbe5b3"
+    },
+    {
+      "path": "docs/plans/2026-03-18-invite-propose-time.md",
+      "sha256": "2419e39d1db8ed1e14fd801172269ea16b80517023f52c0d413dcd8412cad64a"
+    },
+    {
+      "path": "docs/plans/2026-03-18-invite-propose-time/01-overview-tasks-1-5.md",
+      "sha256": "156f97f4d6a77a4f488e32d92e6582fb691be53c771e0d259ddeda1bfb9bfd95"
+    },
+    {
+      "path": "docs/plans/2026-03-18-invite-propose-time/02-tasks-6-10.md",
+      "sha256": "aac7bdb8ea18b9f0cc6d03d4df0753895a47269b4bf0c0005fd2263a5cffeea4"
+    },
+    {
+      "path": "docs/plans/2026-03-18-secretary-access.md",
+      "sha256": "65edb7b7fd76cf9bf985fa459bc80f2c26be11645c1c8a9b6bc944c3b2618ea4"
+    },
+    {
+      "path": "docs/plans/2026-03-18-secretary-access/01-overview-tasks-1-5.md",
+      "sha256": "97c5d354392fb03cec78826879c82785f564e84d693b37a6d0395a5ff2b68218"
+    },
+    {
+      "path": "docs/plans/2026-03-18-secretary-access/02-tasks-6-11.md",
+      "sha256": "3e8bee631e61092525a4b2a3897d27b8de7817af69a2629572d46b193e232e0b"
+    },
+    {
+      "path": "docs/plans/2026-03-19-bidirectional-voice.md",
+      "sha256": "56650c26d8b423618f18f6b5913bdbb9d80b90d346e009591b99015553026209"
+    },
+    {
+      "path": "docs/plans/2026-03-19-bidirectional-voice/01-overview-tasks-1-5.md",
+      "sha256": "de4c06749e629c7ecc0761fb8ecb78b6502f03f11da82635163c3a9549990516"
+    },
+    {
+      "path": "docs/plans/2026-03-19-bidirectional-voice/02-tasks-6-8.md",
+      "sha256": "cbd186681a2239445b0942fc10f241b36a87e665668aa58dc9756b4bd0e5b100"
+    },
+    {
+      "path": "docs/plans/2026-03-19-bidirectional-voice/03-tasks-9-12.md",
+      "sha256": "8ef6a01e2e6d7781742b69d06c54eb1904102543962eb4ac2872ac5dd783a5d8"
+    },
+    {
+      "path": "docs/plans/2026-03-19-scheduled-ai-calls.md",
+      "sha256": "71a045cd1b57349f0e8901ad8944355bf0237bc71b6d0729aebb5f7937da8c77"
+    },
+    {
+      "path": "docs/plans/2026-03-19-scheduled-ai-calls/01-overview-tasks-1-4.md",
+      "sha256": "a9e393210175a614c9776448a35676da1fc538327fb7c5657d237f14dd252417"
+    },
+    {
+      "path": "docs/plans/2026-03-19-scheduled-ai-calls/02-tasks-5-10.md",
+      "sha256": "114c3848ede894bdd024af97d1c81253c7d0741216a571d883c3d9140c16402a"
+    },
+    {
+      "path": "docs/plans/2026-03-19-scheduled-ai-calls/03-tasks-11-15.md",
+      "sha256": "6c2f093e6b05d68674e10c5578be4743f1aeef486ba4a7f1c1c5bdc7ef575e5b"
+    },
+    {
+      "path": "docs/plans/2026-03-20-ai-assistant-bot-server.md",
+      "sha256": "011589a97fbb9ea9242533c62b9dbbb5fe930dff78902baf4087ce0fcf8b4b07"
+    },
+    {
+      "path": "docs/plans/2026-03-20-ai-assistant-bot-server/01-overview-tasks-1-6.md",
+      "sha256": "1f0cda7903e12b863892b0c2a86f0ab024f8ad2d25c39f5b4ed7f5bb11f91ba6"
+    },
+    {
+      "path": "docs/plans/2026-03-20-ai-assistant-bot-server/02-tasks-7-a3.md",
+      "sha256": "799e687be5587fda502b4bb74bde9e29cbd15a04681a575bca90a480e7a5a410"
+    },
+    {
+      "path": "docs/plans/2026-03-20-ai-assistant-bot-server/03-tasks-a4-a10.md",
+      "sha256": "edcf2d6af3d27452bd1d46e972636db96e74cf3681074b78b07391b089e3415a"
+    },
+    {
+      "path": "docs/plans/2026-03-20-birthdays.md",
+      "sha256": "93404bec6678b08cd790b9216800583694130a83641a46ba0793ea9d5e9e79cc"
+    },
+    {
+      "path": "docs/plans/2026-03-20-birthdays/01-overview-tasks-1-4.md",
+      "sha256": "1be5f1480c5e9941b3277e277b3b78c076ddcbce1b4ac054aff9a2b89f11443e"
+    },
+    {
+      "path": "docs/plans/2026-03-20-birthdays/02-tasks-5-6.md",
+      "sha256": "d4c5801bb5dc969333b03d181e494866cc7817cc6533a7a9f7b50d109baa4833"
+    },
+    {
+      "path": "docs/plans/2026-03-20-birthdays/03-tasks-7-9.md",
+      "sha256": "1520e6cf11e76f2bc8dab8de715766b0056986547ae8bdc5363f10ca09087ad9"
+    },
+    {
+      "path": "docs/plans/2026-03-21-stt-corrections.md",
+      "sha256": "37c5276056f484610eb394431eafc9613a1979f5e3f265e925d89fcb653e3a4a"
+    },
+    {
+      "path": "docs/plans/2026-03-21-stt-corrections/01-overview-tasks-1-3.md",
+      "sha256": "f406e4d74f7da5b6c0e22da501c2ae471f2e9a9f38bb7925ca10412ddf3629c5"
+    },
+    {
+      "path": "docs/plans/2026-03-21-stt-corrections/02-tasks-4-7.md",
+      "sha256": "44c3afd247a33f65a40174bd96495c05dec257a60262d2091d1b5e0832ced40f"
+    },
+    {
+      "path": "docs/plans/2026-03-21-stt-corrections/03-task-8.md",
+      "sha256": "ac9a3ce873d0d5d00a2a4657f59d7349c61e0ec72e5b57fc5b3e62d2926871d9"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram.md",
+      "sha256": "bae95e5fd2f849f83b6df4fe52dfa4d088d2fb6f21dc992eb8ca463022e5c119"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram/01-overview-tasks-1-3.md",
+      "sha256": "ebf3df42a6e2b106be6f28f451bb76729ab1d84c270d03d4853a06e6b84b05d3"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram/02-tasks-4-6.md",
+      "sha256": "2e3bc27fb49e476f7ab7cf27749f434d2085c580c8a44e51eb8e204253cd1ef0"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram/03-tasks-7-8.md",
+      "sha256": "ff896312fee3d89605126a462dca00c9e561d804e27a5cf5252b1175b217c815"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram/04-tasks-9-11.md",
+      "sha256": "c7eb8e1d961f65f3c36f4fa42ab9828e1b7ad9bfb543a7956bdfb862600398f3"
+    },
+    {
+      "path": "docs/plans/2026-03-25-connect-telegram/05-tasks-12-14.md",
+      "sha256": "f73f2563c58ce60b94e9ca2c39a95338447e47c90cda89fbf31804c1f8545f54"
+    },
+    {
+      "path": "docs/plans/2026-04-10-openai-sdk-migration.md",
+      "sha256": "d95d2674429cabe4c01717a3b0c9a92379a3818122744c845e51134c445d94fb"
+    },
+    {
+      "path": "docs/plans/2026-04-10-openai-sdk-migration/01-overview-tasks-1-4.md",
+      "sha256": "f56d6be3b7a6a4156a059e0e53226d64c86ae02dc12ce508c1bc020912c30139"
+    },
+    {
+      "path": "docs/plans/2026-04-10-openai-sdk-migration/02-tasks-5-13.md",
+      "sha256": "c07f3bf9a432db4eb62066a62026b050f472b38938bcfcd2856a59c00ca6fe70"
+    },
+    {
+      "path": "docs/specs/03-google-calendar-sync.md",
+      "sha256": "18bfcb1c539065b6897e6485552c61cb11fb49163fe077f3daba86801993e08f"
+    },
+    {
+      "path": "docs/specs/03-google-calendar-sync/01-overview-sections-1-4.md",
+      "sha256": "662e90781d7e494a1c64b573dde7dca6cdf50776000413c2f883ef9e23081692"
+    },
+    {
+      "path": "docs/specs/03-google-calendar-sync/02-sections-5-14.md",
+      "sha256": "5a57675355c59f30e4aa0e4b5cddd80f1fea6a45494074c816d976ce68bedbb1"
+    },
+    {
+      "path": "docs/specs/05-image-generation.md",
+      "sha256": "09085de13bd63b6e833413b5922474278ee721d3c724faa3e3f0ab046372bcc3"
+    },
+    {
+      "path": "docs/specs/05-image-generation/01-overview-sections-1-6.md",
+      "sha256": "f654e350deed82043f8afef2f44d8869a032213d31a5f0b946a0cfe218ca7c88"
+    },
+    {
+      "path": "docs/specs/05-image-generation/02-sections-7-12.md",
+      "sha256": "7552609db879ca579d3548a76bbd7b6607758f71ec58481fd8d3516387015cad"
+    }
+  ],
+  "complete_raw_map_sha256": {
+    "plans": "58f854b95af8de82c9561ba0de85b4b9764c4d0f77f6284de1d9fb0bb5aa3956",
+    "generated": "35b6c20577fae7b1bcd9692d0b518315b4845b7404eac5be6a58e678820f5def"
+  },
+  "plans": {
+    "file": "complexity-size-preservation-plans.json",
+    "sha256": "0d1bee196ac12e97790cb08da41d1ea05c1efea57d1920f3779502ed49d426d8"
+  },
+  "generated": {
+    "file": "complexity-size-preservation-generated.json",
+    "sha256": "da27ef370dc1deedc4442881076a4dd7793ead641cc949a0c14d2c7c97a3374e"
+  }
+}

@@ -1,0 +1,3096 @@
+{
+ "schema": "gh860-upstream-splits/v1",
+ "base": "78b63430374b799d176978fa1edfb7391ca5af8a",
+ "method": "TypeScript AST collector from the #860 preservation audit; keys are suite ancestry + title + occurrence; raw hashes cover the complete callback body and every outer expect chain",
+ "files": [
+  {
+   "original": "test/services/ai/write-receipt.test.ts",
+   "original_source_sha256": "1f91605d52223e6d7f7df9b411cef3dcc19e9e1544e027b513db9238a66cdd63",
+   "original_lines": 1997,
+   "original_cases": 139,
+   "original_assertions": 212,
+   "assertions_outside_cases": 0,
+   "destinations": [
+    {
+     "path": "test/services/ai/write-receipt.test.ts",
+     "lines": 920,
+     "source_sha256": "e518ad1a9d2e61cea8f288bc5a42748af88981de35b0916f9b71e56783e8d42e",
+     "cases": 64,
+     "assertions": 105,
+     "assertions_outside_cases": 0
+    },
+    {
+     "path": "test/services/ai/write-receipt-ledger.test.ts",
+     "lines": 531,
+     "source_sha256": "967f232fc53f5b987601ed4af8f194528185f0ae5c49dbfaec51ea2afc62abae",
+     "cases": 38,
+     "assertions": 56,
+     "assertions_outside_cases": 0
+    },
+    {
+     "path": "test/services/ai/write-receipt-updates.test.ts",
+     "lines": 505,
+     "source_sha256": "7addd0db9ec05e1eaadafca06491f5c66065ab63a2ca71a7f8f7962ced1e7b93",
+     "cases": 37,
+     "assertions": 51,
+     "assertions_outside_cases": 0
+    }
+   ],
+   "cases_matched": 139,
+   "cases_missing": 0,
+   "cases_added": 0,
+   "bodies_identical": 139,
+   "assertion_chains_identical": 139,
+   "cases": [
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "ru: says the event exists, whose calendar, who was not invited and what to do next",
+     "before_line": 123,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 37
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "en: the same receipt",
+     "before_line": 133,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 47
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "%s: never leaks ids, attempt jargon or the meta sentence",
+     "before_line": 142,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 56
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "an invitee nobody can name is counted, not shown by id",
+     "before_line": 160,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 74
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "a calendar the account no longer manages is neither named nor said to be managed",
+     "before_line": 170,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 84
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "a calendar the requester has no active access to is not called one they manage"
+     ],
+     "title": "%s, access %s",
+     "before_line": 182,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 96
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "a calendar the requester has no active access to is not called one they manage"
+     ],
+     "title": "%s: an invented owner_id is told neutrally too",
+     "before_line": 193,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 107
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "a calendar the requester has no active access to is not called one they manage"
+     ],
+     "title": "active access with an unreadable name keeps the secretary wording",
+     "before_line": 202,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 116
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "a calendar the requester has no active access to is not called one they manage"
+     ],
+     "title": "a group chat hides it entirely whatever the access",
+     "before_line": 207,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 121
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "an owner whose name is unknown"
+     ],
+     "title": "ru: names the calendar as someone else's, with no dangling label or id",
+     "before_line": 216,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 130
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "an owner whose name is unknown"
+     ],
+     "title": "en: the same receipt",
+     "before_line": 224,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 138
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create",
+      "an owner whose name is unknown"
+     ],
+     "title": "a group chat still hides the calendar entirely",
+     "before_line": 232,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 146
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed invitations after a delegated create"
+     ],
+     "title": "a group chat shows no title, time, calendar, name or count of ids",
+     "before_line": 240,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 154
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "when the guard fires"
+     ],
+     "title": "a clean success is not guarded",
+     "before_line": 253,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 167
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "when the guard fires"
+     ],
+     "title": "a failure that a later write of the same event fixed is not reported and does not guard",
+     "before_line": 270,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 184
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "when the guard fires"
+     ],
+     "title": "a recovered failure beside a real one reports only the real one",
+     "before_line": 290,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 204
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "when the guard fires"
+     ],
+     "title": "a create of a different event does not erase a failed create",
+     "before_line": 302,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 216
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unknown result"
+     ],
+     "title": "is neither a failure nor a success, and asks to check before repeating",
+     "before_line": 313,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 227
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unknown result"
+     ],
+     "title": "a retry that worked still carries a duplicate check",
+     "before_line": 326,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 240
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unknown result"
+     ],
+     "title": "a retried invitation after an unknown result carries the duplicate check too",
+     "before_line": 338,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 252
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "delivered through a real agent run"
+     ],
+     "title": "the user reads the receipt, not the model claiming every invitation went out",
+     "before_line": 354,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 268
+     },
+     "body_identical": true,
+     "assertions": 6,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the requester timezone reaches the ledger through a real agent run"
+     ],
+     "title": "a rejected all-day create for another local day stays visible",
+     "before_line": 392,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 306
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitation effect without a parsable invitee"
+     ],
+     "title": "resend_invitation %s (%s) is never reported as a plain success",
+     "before_line": 424,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 338
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitation effect without a parsable invitee"
+     ],
+     "title": "a delivered resend does not guard",
+     "before_line": 438,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 352
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitation effect without a parsable invitee"
+     ],
+     "title": "a send_invitation whose invitee cannot be read is told as undelivered, not as a done change",
+     "before_line": 450,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 364
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a receipt never throws, whatever the model put in the request"
+     ],
+     "title": "start_at %p (all day: %p) leaves the event named without a day or time",
+     "before_line": 489,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 403
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a receipt never throws, whatever the model put in the request"
+     ],
+     "title": "timezone %p omits the day and time instead of throwing",
+     "before_line": 498,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 412
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a receipt never throws, whatever the model put in the request"
+     ],
+     "title": "a bad timezone does not stop an event the run has seen from being named",
+     "before_line": 505,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 419
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a receipt never throws, whatever the model put in the request"
+     ],
+     "title": "a valid ISO start still names the local day and time",
+     "before_line": 513,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 427
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "model- and user-controlled names are inert in the delivered message",
+      "in a %s"
+     ],
+     "title": "%j is rendered as plain text and valid Telegram HTML",
+     "before_line": 575,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 489
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "model- and user-controlled names are inert in the delivered message"
+     ],
+     "title": "an @username keeps its inner underscores but cannot open emphasis at its edges",
+     "before_line": 589,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 503
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "all-day days west of UTC come from the written start, not the summary"
+     ],
+     "title": "%s: created on April 15",
+     "before_line": 623,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 537
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "all-day days west of UTC come from the written start, not the summary"
+     ],
+     "title": "a read after the create does not bring the shifted day back",
+     "before_line": 631,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 545
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "all-day days west of UTC come from the written start, not the summary"
+     ],
+     "title": "west of UTC a read of an all-day event never names its shifted day, even before a failed delete",
+     "before_line": 642,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 556
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "all-day days west of UTC come from the written start, not the summary"
+     ],
+     "title": "an all-day event the run never created is not told on a day derived from a shifted summary",
+     "before_line": 653,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 567
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "a failed new create after update_event changed %s stays visible",
+     "before_line": 675,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 589
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an update that restates the same title and start leaves the create standing",
+     "before_line": 692,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 606
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an update whose confirmed result is all-day retires the timed create, whatever spelling the input used",
+     "before_line": 708,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 622
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "a snooze moves the start, so a failed create at the old start stays visible",
+     "before_line": 724,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 638
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an unknown update of the start retires the create",
+     "before_line": 740,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 654
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an unknown delete retires the create: a failed re-create stays visible",
+     "before_line": 754,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 668
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an unknown snooze retires the create",
+     "before_line": 766,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 680
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an unknown update that changes only details retires the create",
+     "before_line": 780,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 694
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a create folded into a moved or renamed event"
+     ],
+     "title": "an update of another field leaves the create standing, so a failed duplicate adds nothing",
+     "before_line": 796,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 710
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "two invitees with the same display name"
+     ],
+     "title": "are both accounted for",
+     "before_line": 810,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 724
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "rejected as \"bob\", then delivered as %j: nothing contradicts",
+     "before_line": 825,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 739
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "unknown as \"bob\", then delivered as %j: one duplicate check, no unknown line",
+     "before_line": 832,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 746
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered as \"bob\", then refused as %j: both outcomes stay told, the delivery is not overwritten",
+     "before_line": 841,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 755
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, then unknown on a repeat: the delivery stays, the repeat is unconfirmed",
+     "before_line": 852,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 766
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, then a skipped repeat: nothing to report",
+     "before_line": 861,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 775
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, refused, delivered again: nothing to report",
+     "before_line": 872,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 786
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, unknown, delivered again: the duplicate check, no unknown line",
+     "before_line": 880,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 794
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "unknown, delivered as @bob, delivered again as Bob: the duplicate check is kept",
+     "before_line": 890,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 804
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, then a repeat that only created the invitation: the delivery stays, the other is told beside",
+     "before_line": 898,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 812
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, unknown, then created but not delivered: the duplicate warning is kept",
+     "before_line": 911,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 825
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, unknown, created but not delivered, delivered again: the duplicate warning survives",
+     "before_line": 925,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 839
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, unknown, created but not delivered twice: the duplicate warning survives",
+     "before_line": 935,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 849
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, created but not delivered, then refused: the second invitation stays told",
+     "before_line": 945,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 859
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "unknown, then refused: the unknown stays the open question",
+     "before_line": 957,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 871
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "a zero invitee_id is no id: the same person as the username alone",
+     "before_line": 965,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 879
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "delivered, cancelled, then refused: the refusal is told",
+     "before_line": 972,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 886
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "a null invitee_id does not make two usernames one invitee",
+     "before_line": 980,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 894
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an invitee typed in several ways is one write"
+     ],
+     "title": "two different people stay two writes",
+     "before_line": 987,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 901
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "one contact named in several ways is one person"
+     ],
+     "title": "username casing and username plus id are the same invitee",
+     "before_line": 996,
+     "after": {
+      "path": "test/services/ai/write-receipt.test.ts",
+      "line": 910
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "a failed recreation stays visible after the earlier create was deleted",
+     "before_line": 1017,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 36
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "declining an event (attendance_declined) does not retire the create of that event",
+     "before_line": 1025,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 44
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "an impossible calendar date is not turned into another day",
+     "before_line": 1034,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 53
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "an extra event_id in a create input does not rename the created event",
+     "before_line": 1044,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 63
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "listing the occurrences of a created series keeps the created day",
+     "before_line": 1053,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 72
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "all_day \"false\" is not all-day: the string and the boolean form are the same create",
+     "before_line": 1083,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 102
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "a failed all-day create is not hidden by a timed create at the same instant",
+     "before_line": 1090,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 109
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "reject %s, then create %s",
+     "before_line": 1115,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 134
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "a created all-day event absorbs a rejected retry in another spelling",
+     "before_line": 1124,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 143
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "an impossible date is never rolled into a real day to match another create",
+     "before_line": 1131,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 150
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "another calendar day stays a separate, visible failure",
+     "before_line": 1138,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 157
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "recurring all-day spellings stay distinct: a series expands from its start instant",
+     "before_line": 1145,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 164
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)",
+      "one-off all-day creates are one event when they name the same calendar day"
+     ],
+     "title": "a timed create at the same instant is a different event from the all-day one",
+     "before_line": 1153,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 172
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "a rejected all-day create shows the calendar day the handler stores, not the UTC day",
+     "before_line": 1167,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 186
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "a timed date-only start is read as the UTC instant the handler stores, in the user zone",
+     "before_line": 1178,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 197
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "ledger identity and dates (regressions)"
+     ],
+     "title": "a long name is cut by code point, never through a surrogate pair",
+     "before_line": 1185,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 204
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a repeated create that ends unknown (exact texts)"
+     ],
+     "title": "success, then an unknown repeat: the repeat is the unconfirmed one",
+     "before_line": 1208,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 223
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the create key covers end, location and description"
+     ],
+     "title": "a failed create that differs in %s stays visible",
+     "before_line": 1224,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 239
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the create key covers end, location and description"
+     ],
+     "title": "absent, empty and blank location or description are the same create",
+     "before_line": 1235,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 250
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the create key covers end, location and description"
+     ],
+     "title": "an update that changes the location retires the create; one that restates it does not",
+     "before_line": 1242,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 257
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a corrected retry settles the rejected attempt, whatever it corrected"
+     ],
+     "title": "rejected with one %s, then created with another: no Not created line",
+     "before_line": 1260,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 275
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "end spellings of one all-day date"
+     ],
+     "title": "a rejected repeat with the end spelled another way adds nothing",
+     "before_line": 1277,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 292
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "end spellings of one all-day date"
+     ],
+     "title": "restating the end in another spelling does not retire the create",
+     "before_line": 1284,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 299
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "create identity and retirement: pinned details"
+     ],
+     "title": "the calendar owner is part of the create key",
+     "before_line": 1298,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 313
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "create identity and retirement: pinned details"
+     ],
+     "title": "deleting another event does not retire this create",
+     "before_line": 1305,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 320
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "create identity and retirement: pinned details"
+     ],
+     "title": "an update whose confirmed result carries another title retires the create, whatever the input says",
+     "before_line": 1314,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 329
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the duplicate warning names the repeated request, not the event as it is now"
+     ],
+     "title": "an update after the repeat does not rename the event in the warning",
+     "before_line": 1332,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 347
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "the duplicate warning names the repeated request, not the event as it is now"
+     ],
+     "title": "the warning is built from the repeat itself, as it was worded",
+     "before_line": 1346,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 361
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "occurrence rows of %s, then a failed update: the event is named by title alone",
+     "before_line": 1373,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 388
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "the first start of a series from %s is never a day for a later failed write",
+     "before_line": 1385,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 400
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "a successful update without a start, and its summary, say nothing about the day",
+     "before_line": 1399,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 414
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "a series the run created is told by its own start, and listing its occurrences changes nothing",
+     "before_line": 1408,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 423
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "a snooze and a list afterwards leave no pre-snooze time on a later write",
+     "before_line": 1425,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 440
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "%s: a successful update of an all-day start %s is told on the calendar day it wrote",
+     "before_line": 1445,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 460
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "an all-day flag of null is no flag: a successful update with no summary names the event by title alone",
+     "before_line": 1461,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 476
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "a successful update with no summary and no all-day flag names the event by title alone",
+     "before_line": 1476,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 491
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "%s with no summary is told by its own start",
+     "before_line": 1485,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 500
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an event's day and time come only from the write itself"
+     ],
+     "title": "a failed or unconfirmed update that asked for a start names the event by title alone",
+     "before_line": 1505,
+     "after": {
+      "path": "test/services/ai/write-receipt-ledger.test.ts",
+      "line": 520
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "after a details-only update a failed repeat asking for those details is still folded",
+     "before_line": 1522,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 30
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a repeat asking for the old details is a visible failure after such an update",
+     "before_line": 1530,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 38
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a failure the update corrected no longer shows",
+     "before_line": 1538,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 46
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "an unknown repeat with other details stays its own line and sets no duplicate warning",
+     "before_line": 1547,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 55
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "clearing %s makes the event match a create that never had it",
+     "before_line": 1565,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 73
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a refused update leaves the create and its refused repeat as they were",
+     "before_line": 1579,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 87
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a skipped repeat the update then matches is settled",
+     "before_line": 1589,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 97
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a renamed or moved event is keyed by its new identity: a repeat of the new one is folded, of the old one visible",
+     "before_line": 1597,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 105
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a refused create is settled by an update that renames the event into it",
+     "before_line": 1608,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 116
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "a successful recurrence removal on an all-day series, with no restated start, retires the create",
+     "before_line": 1620,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 128
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an update rewrites what the earlier create now stands for"
+     ],
+     "title": "an all-day flip with the start restated is re-keyed: the repeat of the new event is folded",
+     "before_line": 1630,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 138
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a refused create is compared only with a success in the same calendar"
+     ],
+     "title": "another owner or scope is not a field of the line",
+     "before_line": 1641,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 149
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a start without an offset is never read in the server zone"
+     ],
+     "title": "refused with no offset, then created with one: the refused line names no day or time",
+     "before_line": 1657,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 165
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a refused create that differs only by recurrence or all-day names that field"
+     ],
+     "title": "%s: refused with %j, then created plain",
+     "before_line": 1678,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 186
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a failed create kept visible next to a success names what it asked for differently"
+     ],
+     "title": "%s: %j",
+     "before_line": 1700,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 208
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed creates next to one success stay separate lines"
+     ],
+     "title": "two unconfirmed repeats that differ in different details are two lines",
+     "before_line": 1722,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 230
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed creates next to one success stay separate lines"
+     ],
+     "title": "where targets are hidden, creates of different events do not merge",
+     "before_line": 1734,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 242
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed creates next to one success stay separate lines"
+     ],
+     "title": "the fields follow the event as an update re-keys it",
+     "before_line": 1749,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 257
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed creates next to one success stay separate lines"
+     ],
+     "title": "a second success that adds a detail is told as a plain creation",
+     "before_line": 1765,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 273
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "failed creates next to one success stay separate lines"
+     ],
+     "title": "a folded unknown repeat makes the closing line ask to check the calendar",
+     "before_line": 1773,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 281
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unconfirmed update and the duplicate warnings"
+     ],
+     "title": "an unconfirmed update does not settle a refused create it would match",
+     "before_line": 1787,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 295
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unconfirmed update and the duplicate warnings"
+     ],
+     "title": "an unconfirmed update that changes nothing the create asked for keeps the create",
+     "before_line": 1795,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 303
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unconfirmed update and the duplicate warnings"
+     ],
+     "title": "a retry that worked after an unknown invitation, plus a refusal, asks to check the calendar",
+     "before_line": 1803,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 311
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unconfirmed update and the duplicate warnings"
+     ],
+     "title": "the repeat warning names the calendar the event lives in",
+     "before_line": 1814,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 322
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an unconfirmed update and the duplicate warnings"
+     ],
+     "title": "a failed create is compared with the closest success of the event",
+     "before_line": 1825,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 333
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "identical refused creates next to a success are one line"
+     ],
+     "title": "the same refused call sent twice is told once",
+     "before_line": 1843,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 351
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "identical refused creates next to a success are one line"
+     ],
+     "title": "a refused and an unconfirmed create with the same details stay separate lines",
+     "before_line": 1852,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 360
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "identical refused creates next to a success are one line"
+     ],
+     "title": "refused creates that differ in their details stay separate lines",
+     "before_line": 1861,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 369
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "identical refused creates next to a success are one line"
+     ],
+     "title": "a refusal for another calendar or scope survives an update that matches it otherwise",
+     "before_line": 1870,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 378
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a start-only update leaves the end as stored (update_event never shifts it)"
+     ],
+     "title": "a refused repeat of the new start with the old end is folded, one with another end stays visible",
+     "before_line": 1882,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 390
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "an end that cannot be re-read in the other form"
+     ],
+     "title": "a flip to all-day without a restated end retires the create: the original request stays visible",
+     "before_line": 1900,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 408
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "what an update leaves unsettled"
+     ],
+     "title": "an unknown failure that the update then matches still has to be checked",
+     "before_line": 1917,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 425
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "what an update leaves unsettled"
+     ],
+     "title": "an all-day flag changed without a start cannot be re-keyed: a failed repeat stays visible",
+     "before_line": 1925,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 433
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "what an update leaves unsettled"
+     ],
+     "title": "an end restated in another all-day spelling keeps the end key",
+     "before_line": 1937,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 445
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "two unknown repeats of one create keep both warnings"
+     ],
+     "title": "even when an update moved the event between them",
+     "before_line": 1950,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 458
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a repeat warning where targets are hidden"
+     ],
+     "title": "two such repeats make one sentence",
+     "before_line": 1970,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 478
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "a repeat warning where targets are hidden"
+     ],
+     "title": "is a sentence without an event",
+     "before_line": 1988,
+     "after": {
+      "path": "test/services/ai/write-receipt-updates.test.ts",
+      "line": 496
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    }
+   ]
+  },
+  {
+   "original": "test/scripts/hcb-alert-watcher.test.ts",
+   "original_source_sha256": "a8f36603875dc5a6d89a31add5cf46afdc2667a4dc6bfd885952ee5023c7eb64",
+   "original_lines": 1477,
+   "original_cases": 72,
+   "original_assertions": 267,
+   "assertions_outside_cases": 0,
+   "destinations": [
+    {
+     "path": "test/scripts/hcb-alert-watcher.test.ts",
+     "lines": 837,
+     "source_sha256": "07f408a4a8dd6514e60d54c308c766ed32fc2706cf7fc29a674b291b2a66a960",
+     "cases": 48,
+     "assertions": 159,
+     "assertions_outside_cases": 0
+    },
+    {
+     "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+     "lines": 513,
+     "source_sha256": "bf5fc862bbcfe94dd5a78fa94a9c6bc5aee4543664d565d06d1579bd7cb0a807",
+     "cases": 24,
+     "assertions": 108,
+     "assertions_outside_cases": 0
+    }
+   ],
+   "cases_matched": 72,
+   "cases_missing": 0,
+   "cases_added": 0,
+   "bodies_identical": 69,
+   "assertion_chains_identical": 72,
+   "cases": [
+    {
+     "suites": [
+      "loadConfig"
+     ],
+     "title": "refuses to start without the alert token, and the error never carries one",
+     "before_line": 203,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 38
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "loadConfig"
+     ],
+     "title": "defaults: production URL, 30 s poll, one session per 30 minutes, XDG state directory",
+     "before_line": 208,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 43
+     },
+     "body_identical": true,
+     "assertions": 7,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "loadConfig"
+     ],
+     "title": "rejects a non-numeric or non-positive interval instead of busy-looping on it",
+     "before_line": 219,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 54
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "one alert starts exactly one detached omp session, briefed with its class, time and source",
+     "before_line": 230,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 65
+     },
+     "body_identical": true,
+     "assertions": 8,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "the brief makes the session read-only first, bound by AGENTS.md, and reporting through tg report",
+     "before_line": 248,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 83
+     },
+     "body_identical": true,
+     "assertions": 8,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "alert text is fenced as untrusted data: a commit message cannot give the session orders",
+     "before_line": 265,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 100
+     },
+     "body_identical": true,
+     "assertions": 5,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "alert text cannot close the fence early and smuggle instructions outside it",
+     "before_line": 280,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 115
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "the session gets a visible tmux window that follows its log until it exits",
+     "before_line": 290,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 125
+     },
+     "body_identical": true,
+     "assertions": 11,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a missing tmux never blocks the investigation",
+     "before_line": 311,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 146
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "the alert secret authenticates the poll, and never reaches the child env, logs or brief",
+     "before_line": 319,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 154
+     },
+     "body_identical": true,
+     "assertions": 6,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "an alert delivered twice starts one session, even once the rate limit has passed",
+     "before_line": 338,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 173
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "alerts waiting out the rate limit are logged once, not on every 30-second poll",
+     "before_line": 350,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 185
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a second alert inside the 30-minute window waits; both go to one session when it opens",
+     "before_line": 363,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 198
+     },
+     "body_identical": true,
+     "assertions": 7,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "an alert older than the stale limit is consumed and logged, but never wakes the owner",
+     "before_line": 390,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 225
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a drained backlog of old alerts plus one fresh one starts one session about the fresh one",
+     "before_line": 400,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 235
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a notice that tg could not deliver is not counted as sent: the next blind probe tries again",
+     "before_line": 415,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 250
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launch-failure notice that tg could not deliver is retried with the next failed attempt",
+     "before_line": 428,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 263
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "an outage that starts during a long gap is a new incident, not suppressed by the key of the one before it",
+     "before_line": 442,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 277
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a replayed claim whose launcher fails again is retried after the minute, not held by the 30-minute limit",
+     "before_line": 458,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 293
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "failures separated by a long gap (suspend, service stopped) are not one outage",
+     "before_line": 488,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 323
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that just failed is left alone for a minute, not hit on every 30-second poll",
+     "before_line": 499,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 334
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a claim whose session already has a log was started before the process died: confirmed, not launched again",
+     "before_line": 514,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 349
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a down incident left pending when a blind period dropped its key does not launch after the outage is over",
+     "before_line": 543,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 378
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a crash after the claim but before the launch replays the alert once, ignoring the rate limit it consumed",
+     "before_line": 564,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 399
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a helper killed by a signal before its deadline is a failed launch, not a timeout: the alert stays pending",
+     "before_line": 594,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 429
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a long blind period ends an outage that nobody could see: the next outage is a new incident",
+     "before_line": 609,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 444
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "one resolver hiccup in the middle of an outage does not turn it into a second incident",
+     "before_line": 622,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 457
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a pending alert that waited past the stale limit for a broken launcher is dropped, not launched days later",
+     "before_line": 644,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 479
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "an outage that ended while its session waited out the rate limit is not investigated afterwards",
+     "before_line": 657,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 492
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a body that cannot be read after the pop is recorded, not lost silently",
+     "before_line": 678,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 513
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a queue that keeps answering 200 with a page instead of JSON is saved once per cycle, not 50 times",
+     "before_line": 702,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 537
+     },
+     "body_identical": false,
+     "assertions": 4,
+     "assertions_identical": true,
+     "before_body_sha256": "4726ffa6ca15f1979b59ef9e212001783a2b6e41a74c5f5009b821867fac0af5",
+     "after_body_sha256": "b532102a6adb56bc437df4b2f836c52df3a88ccca790996914aa56c4c7f37961"
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that exits just before its deadline is not reported as a timeout by the output grace wait",
+     "before_line": 726,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 563
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that exits 0 while a child it started still holds stdout is a success, not a timeout",
+     "before_line": 737,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 574
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "an alert that reuses an earlier id after the database was restored from a backup is still investigated",
+     "before_line": 750,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 587
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a claim made moments ago, with no log yet, may still be in flight: the restarted watcher waits, then replays",
+     "before_line": 762,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 599
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a queue host that redirects does not receive the alert token somewhere else",
+     "before_line": 790,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 627
+     },
+     "body_identical": false,
+     "assertions": 5,
+     "assertions_identical": true,
+     "before_body_sha256": "286d5f8142c56bde2980d2f2158777aae86a0f38f096b33f260eb5f76a0ad989",
+     "after_body_sha256": "71d10693ba769b30c00ba8ff464b733131cce3097adceb86a52186600b14d025"
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "the timeout notice names the log directory the watcher actually reads",
+     "before_line": 827,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 666
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a restart between the pop and the launch loses nothing: the alert is replayed once",
+     "before_line": 836,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 675
+     },
+     "body_identical": true,
+     "assertions": 5,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that hangs is killed, so one stuck command cannot freeze probing and polling",
+     "before_line": 855,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 694
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that times out may already have started the session: no second session on the next poll",
+     "before_line": 867,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 706
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a timestamp already carrying a zone is read as that instant, not as unparseable",
+     "before_line": 881,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 720
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a 200 the watcher cannot read is saved, not lost: the pop already consumed it on the server",
+     "before_line": 895,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 734
+     },
+     "body_identical": false,
+     "assertions": 3,
+     "assertions_identical": true,
+     "before_body_sha256": "be759ca14a846a15159662e3a5cca3e99b004247dd632ff0f92283b6f450e4dd",
+     "after_body_sha256": "61e6f9f38181c903e8323c65b1a9b5e7d1c9555067e152692b89226a9dadaeab"
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a failed launch leaves no brief behind to pile up on every retry",
+     "before_line": 919,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 760
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a hostile source field cannot carry instructions outside the fence",
+     "before_line": 930,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 771
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a token the server rejects is reported once, in Russian, not only in a journal nobody reads",
+     "before_line": 940,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 781
+     },
+     "body_identical": true,
+     "assertions": 5,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a gateway error is not a configuration failure and sends no notice (the readiness probe owns it)",
+     "before_line": 959,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 800
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a launcher that cannot start tells the owner once, in Russian, instead of failing silently",
+     "before_line": 966,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 807
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "queued alerts"
+     ],
+     "title": "a rejected token or a down queue logs the failure and never launches or crashes",
+     "before_line": 983,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher.test.ts",
+      "line": 824
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "timeout alerts (aggregated by kind)"
+     ],
+     "title": "a timeout alert launches a session whose brief tells unrecovered from recovered",
+     "before_line": 1024,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 60
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "timeout alerts (aggregated by kind)"
+     ],
+     "title": "another source cannot switch the timeout checklist on",
+     "before_line": 1043,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 79
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "two overlapping runs of one chat: both alerts are queued, neither is taken for a duplicate, one session carries both",
+     "before_line": 1052,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 88
+     },
+     "body_identical": true,
+     "assertions": 8,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "an incident inside the closed 30-minute window waits and then goes out whole, requestId intact",
+     "before_line": 1071,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 107
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "a very long tools line cannot push the requestId out of the brief",
+     "before_line": 1087,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 123
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "the brief carries the incident checklist: every run in the log and the chat log, receipts against rows incl. duplicates, delivery, host load, render queue, validator timings",
+     "before_line": 1097,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 133
+     },
+     "body_identical": true,
+     "assertions": 14,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "everything read from production is marked untrusted in every brief, ahead of any checklist, even one without an incident alert",
+     "before_line": 1122,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 158
+     },
+     "body_identical": true,
+     "assertions": 5,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "the incident checklist leaves the marking ahead of it and its duplicate query selects no title, for every class",
+     "before_line": 1136,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 172
+     },
+     "body_identical": true,
+     "assertions": 8,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "the queries of the brief, run on the real events schema with stored-format timestamps, find a later retry and a deleted copy, skip other users and return no title",
+     "before_line": 1162,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 198
+     },
+     "body_identical": true,
+     "assertions": 6,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "the checklist is report-only: no replayed writes, no repairs, tickets reused before filed, no user data in the report",
+     "before_line": 1227,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 263
+     },
+     "body_identical": true,
+     "assertions": 7,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "each class gets its own block: an unverified answer is not a spent round limit",
+     "before_line": 1242,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 278
+     },
+     "body_identical": true,
+     "assertions": 8,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "agent-run-incident alerts (a user run that ended badly while /health and /ready stay green)"
+     ],
+     "title": "a source that only claims to be an incident gets no checklist, and the text cannot pick the class",
+     "before_line": 1265,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 301
+     },
+     "body_identical": true,
+     "assertions": 6,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "three consecutive failed probes start one session; two do not",
+     "before_line": 1292,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 328
+     },
+     "body_identical": true,
+     "assertions": 6,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "nothing listening counts as down; the same outage raises one session, not one per probe",
+     "before_line": 1311,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 347
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a name that does not resolve here is the watcher being blind, not the bot being down: one Russian notice, no session",
+     "before_line": 1321,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 357
+     },
+     "body_identical": true,
+     "assertions": 5,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a probe that could not resolve breaks the run of failures: the outage must be consecutive to count",
+     "before_line": 1336,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 372
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a resolving name again ends the blind streak; the next one is announced again",
+     "before_line": 1347,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 383
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a single failed probe is logged with its reason: a blip must not leave nothing in the journal",
+     "before_line": 1358,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 394
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a host that answers /ready too late is a timeout with its limit, not a refused connection: the odroid under swap pressure",
+     "before_line": 1373,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 409
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "the failure count survives a restart of the service",
+     "before_line": 1388,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 424
+     },
+     "body_identical": true,
+     "assertions": 1,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "\"ok\" and \"ok (unverified)\" are healthy; a 200 with any other body is not (a proxy placeholder page)",
+     "before_line": 1399,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 435
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "readiness probe (a hard-down bot cannot queue its own DOWN alert)"
+     ],
+     "title": "a recovery ends the outage: the next outage is a new incident, still limited to one session per 30 minutes",
+     "before_line": 1413,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 449
+     },
+     "body_identical": true,
+     "assertions": 3,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "process"
+     ],
+     "title": "without a token the process exits with the configuration code and prints no secret",
+     "before_line": 1453,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 489
+     },
+     "body_identical": true,
+     "assertions": 2,
+     "assertions_identical": true
+    },
+    {
+     "suites": [
+      "process"
+     ],
+     "title": "--once runs one cycle against the configured endpoint and exits 0",
+     "before_line": 1459,
+     "after": {
+      "path": "test/scripts/hcb-alert-watcher-incidents.test.ts",
+      "line": 495
+     },
+     "body_identical": true,
+     "assertions": 4,
+     "assertions_identical": true
+    }
+   ]
+  }
+ ],
+ "base_note": "main 78b63430374b799d176978fa1edfb7391ca5af8a; these three files were introduced or grown after bb7a9d4765e406b3c2c258fc4ad55445643857ac by upstream feature work and exceeded the 1200-line limit.",
+ "source_split": {
+  "original": "src/database/repositories/event.repository.ts",
+  "original_sha256": "d6a60324ea812d69f1007cb15ec54776c03206753d9380b131eb4b9d9e7bbee5",
+  "original_lines": 1212,
+  "destinations": [
+   {
+    "path": "src/database/repositories/event.repository.ts",
+    "sha256": "ae61a86ca6ef58e1b4dc3c041fe31c2a282f31714d90ea44b85add87f04ee48c",
+    "lines": 1162
+   },
+   {
+    "path": "src/database/repositories/event-duplicate-match.ts",
+    "sha256": "d26f09e58f3557dcc4da4af62ad057a6f429eab61c8121d4f70d50343414a27c",
+    "lines": 56
+   }
+  ],
+  "moved_verbatim": [
+   "CreateOutcome",
+   "localDay",
+   "sameInstants",
+   "sameDetails",
+   "parseMinutes",
+   "normalizedTitle"
+  ],
+  "public_surface": "EventRepository, its exported constants and the CreateOutcome type are unchanged; CreateOutcome is re-exported from event.repository.ts so ../../database/repositories/event.repository.ts imports keep working."
+ },
+ "shared_fixture_modules": [
+  {
+   "path": "test/services/ai/write-receipt-helpers.ts",
+   "sha256": "62881a9290f569d6d67241c3a42f98d97d450efd9c60ecfcbc6bab493b19ef15",
+   "lines": 120,
+   "origin": "lines 23-117 and 1195-1197 of the original, with `export` added"
+  },
+  {
+   "path": "test/scripts/hcb-alert-watcher-harness.ts",
+   "sha256": "f98b9c879d85af7c18bc2bc1285377e2bbbe2c2e2bc1d8784c9d3ec2d286fe33",
+   "lines": 200,
+   "origin": "lines 29-200 of the original; the hooks sit in useWatcherHarness(), which each test file calls once"
+  }
+ ]
+}

@@ -555,6 +555,10 @@ Patch: `scripts/ntgcalls-fix-network-state.patch`.
 
 **The compiled `.so` is NOT in git (venv/ is gitignored). Must rebuild on each server.**
 
+The host uses the universal, hash-checked `requirements.lock`; update and verification
+commands are in [Python dependency locks](python-dependencies.md). Install dependencies
+before building the patched ntgcalls binary, and repeat the patch after an update that reinstalls it.
+
 On every new Linux server:
 
 ```bash
@@ -563,7 +567,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Create Python venv and install deps
 uv venv --python 3.12 venv
-uv pip install -r pyproject.toml --python venv/bin/python
+uv pip sync --require-hashes --python venv/bin/python requirements.lock
+uv pip check --python venv/bin/python
 
 # 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
 ./scripts/build-patched-ntgcalls.sh python3.12 venv

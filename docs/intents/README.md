@@ -6,7 +6,7 @@
 
 Отпечаток целевого сида: `77224e790a7503b776e6d5650325890439081b0ba34c5aca99b9bd93afe6d007`
 
-Навигация: [правила по категориям](#правила-по-категориям) · [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
+Навигация: [описание движка и правил безопасности](engine.md) · [HTML-страница с поиском и фильтрами](index.html) · [машиночитаемый каталог](catalogue.json) · [заметки по каталогу и приватному отчёту](../intent-catalogue.md) · [план перестройки](../plans/2026-09-18-intent-redesign.md)
 
 Примеры в карточках составлены вручную. Отдельный приватный replay выполнен на 402 сохранённых естественных сообщениях; персональные тексты и статистика не включаются в публичные карточки. Результаты replay не считаются точностью или доказательством успешного действия. Статистика из живой базы в публичный каталог не включается.
 
@@ -38,12 +38,14 @@
 ## Как создать и пересобрать документацию
 
 ```bash
-bun run docs:intents          # пересобрать README.md, rules/*.md, index.html (+ index.css, index.js, index-workflows.js) и catalogue.json
+bun run docs:intents          # пересобрать README.md, index.html и catalogue.json
 bun run docs:intents:check    # завершится ошибкой, если файлы отстали от исходников
 bun --no-env-file scripts/verify-intent-docs.ts   # проверить настоящую страницу в Chromium
 ```
 
-Новое правило описывается в исходниках сида, русский заголовок добавляется в [`intent-doc-labels.ts`](../../scripts/intent-doc-labels.ts), затем документация пересобирается. Обычный тестовый прогон сравнивает исходники со всеми сгенерированными файлами: этой страницей, страницами правил, HTML-страницей с её таблицей стилей и скриптами и каталогом JSON. Безопасное применение сида к базе (пробный запуск, резервная копия, применение) описано в [движке](engine.md#безопасная-миграция-базы-сначала-пробный-запуск).
+Новое правило описывается в исходниках сида, русский заголовок добавляется в [`intent-doc-labels.ts`](../../scripts/intent-doc-labels.ts), затем документация пересобирается. Обычный тестовый прогон сравнивает исходники со всеми тремя файлами. Безопасное применение сида к базе (пробный запуск, резервная копия, применение) описано в [движке](engine.md#безопасная-миграция-базы-сначала-пробный-запуск).
+
+After the split, the same build and freshness check also cover all Markdown rule pages, HTML workflow pages, `index.css`, and `index.js`. Full workflows remain readable through the catalogue links without JavaScript.
 
 ## Как читать описание шагов
 
@@ -209,12 +211,12 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | ` cancel_event_by_time_tomorrow ` | Отменить событие завтра по времени | Выведено без замены | нет замены | A time can match several events; selection by clock time is ambiguous. |
 | ` cancel_referenced_event ` | Отменить обсуждаемое событие | Выведено без замены | нет замены | Resolved its target from the last mentioned event, which can select the wrong event; a title or number is now required. |
 | ` clear_today_events ` | Очистить события сегодняшнего дня | Выведено без замены | нет замены | Bulk deletion; no rule may delete more than one event per confirmed request. |
-| ` common_free_time_with_contact ` | Общее свободное время с контактом | Выведено без замены | нет замены | Needs another person's calendar, which no tool exposes. |
+| ` common_free_time_with_contact ` | Общее свободное время с контактом | Выведено без замены | нет замены | Needs another person&&#35;39;s calendar, which no tool exposes. |
 | ` current_timezone_setting ` | Показать текущий часовой пояс | Выведено без замены | нет замены | Answerable from the profile by the assistant; the settings view already lists it. |
 | ` decline_event_invitation ` | Отклонить приглашение на событие | Выведено без замены | нет замены | The delete tool turns deletion of a non-owned event into declining attendance, so the recipe misnamed one action as the other. |
 | ` delete_last_created_event ` | Удалить последнее созданное событие | Выведено без замены | нет замены | Resolved its target from the last mentioned event, which can select the wrong event; a title or number is now required. |
-| ` delete_next_event ` | Удалить ближайшее событие | Выведено без замены | нет замены | Chose "the next event" implicitly; a wrong pick deletes the wrong event. Use a title or number. |
-| ` events_with_person ` | События с определённым человеком | Выведено без замены | нет замены | Event search matches titles, not participants, and declined names &#40;"Ивана" vs "Иван"&#41; never match. |
+| ` delete_next_event ` | Удалить ближайшее событие | Выведено без замены | нет замены | Chose &quot;the next event&quot; implicitly; a wrong pick deletes the wrong event. Use a title or number. |
+| ` events_with_person ` | События с определённым человеком | Выведено без замены | нет замены | Event search matches titles, not participants, and declined names &#40;&quot;Ивана&quot; vs &quot;Иван&quot;&#41; never match. |
 | ` extend_event_duration_hours ` | Продлить событие на часы | Выведено без замены | нет замены | Needs read-modify-write arithmetic on the end time; no tool changes duration relatively. |
 | ` extend_event_duration_minutes ` | Продлить событие на минуты | Выведено без замены | нет замены | Needs read-modify-write arithmetic on the end time; no tool changes duration relatively. |
 | ` is_today_public_holiday ` | Проверить, праздник ли сегодня | Выведено без замены | нет замены | The holiday tool has no date filter, so the recipe could only return an unfiltered list under a misleading label. |
@@ -237,7 +239,7 @@ bun --no-env-file scripts/verify-intent-docs.ts   # проверить наст�
 | ` show_holidays_this_month ` | Праздники текущего месяца | Выведено без замены | нет замены | The holiday tool has no date filter, so the recipe could only return an unfiltered list under a misleading label. |
 | ` show_holidays_this_year ` | Праздники текущего года | Выведено без замены | нет замены | The holiday tool has no date filter, so the recipe could only return an unfiltered list under a misleading label. |
 | ` snooze_event_default ` | Отложить обсуждаемое событие | Выведено без замены | нет замены | Resolved its target from the last mentioned event, which can select the wrong event; a title or number is now required. |
-| ` who_is_contact ` | Уточнить сведения о контакте | Выведено без замены | нет замены | Matched any "who is X" question, including general knowledge; only an explicit "find contact" is safe. |
+| ` who_is_contact ` | Уточнить сведения о контакте | Выведено без замены | нет замены | Matched any &quot;who is X&quot; question, including general knowledge; only an explicit &quot;find contact&quot; is safe. |
 | ` world_clock_common_cities ` | Время в нескольких городах | Выведено без замены | нет замены | Depended on a fixed city list that goes stale. |
 
 </details>

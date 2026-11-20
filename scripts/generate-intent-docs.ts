@@ -8,9 +8,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { buildCatalogue, type CatalogueSource, currentSource, DOCS_DIRECTORY } from './intent-doc-catalogue.ts';
-import { readEngineMarkdown, renderHtml, renderHtmlAssets } from './intent-doc-html.ts';
+import { readEngineMarkdown, renderHtml, renderHtmlAssets, renderHtmlIndex } from './intent-doc-html.ts';
 import { RULES_DIRECTORY, renderMarkdown, renderMarkdownFiles } from './intent-doc-markdown.ts';
 import { lineCount } from './intent-doc-text.ts';
+import { WORKFLOWS_DIRECTORY } from './intent-doc-workflows.ts';
 
 export {
   buildCatalogue,
@@ -47,7 +48,7 @@ export function generatedFiles(
   const c = buildCatalogue(source);
   const files: GeneratedFiles = {
     ...renderMarkdownFiles(c),
-    'index.html': renderHtml(c, engine),
+    'index.html': renderHtmlIndex(c, engine),
     ...renderHtmlAssets(c),
     'catalogue.json': `${JSON.stringify(c, null, 2)}\n`,
   };
@@ -55,14 +56,22 @@ export function generatedFiles(
   return files;
 }
 
-/** Regular .md files left in the generated rules/ directory that the current catalogue no longer produces. */
-function leftoverRuleFiles(directory: string, files: GeneratedFiles): string[] {
-  const rules = resolve(directory, RULES_DIRECTORY);
-  if (!existsSync(rules)) return [];
-  return readdirSync(rules, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-    .map((entry) => `${RULES_DIRECTORY}/${entry.name}`)
-    .filter((path) => !(path in files));
+/** Only the explicitly generated page directories and retired compact workflow asset are managed here. */
+function leftoverGeneratedFiles(directory: string, files: GeneratedFiles): string[] {
+  const directories = [
+    [RULES_DIRECTORY, '.md'],
+    [WORKFLOWS_DIRECTORY, '.html'],
+  ] as const;
+  const leftovers = directories.flatMap(([folder, extension]) => {
+    const path = resolve(directory, folder);
+    if (!existsSync(path)) return [];
+    return readdirSync(path, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
+      .map((entry) => `${folder}/${entry.name}`)
+      .filter((name) => !(name in files));
+  });
+  if (existsSync(resolve(directory, 'index-workflows.js'))) leftovers.push('index-workflows.js');
+  return leftovers;
 }
 
 export function checkGeneratedFiles(directory: string): void {
@@ -71,7 +80,7 @@ export function checkGeneratedFiles(directory: string): void {
     if (readFileSync(resolve(directory, name), 'utf8') !== data)
       throw new Error(`Generated docs stale: ${name}; run bun run docs:intents`);
   }
-  const [leftover] = leftoverRuleFiles(directory, files);
+  const [leftover] = leftoverGeneratedFiles(directory, files);
   if (leftover) throw new Error(`Generated docs stale: unexpected ${leftover}; run bun run docs:intents`);
 }
 
@@ -82,7 +91,7 @@ function writeGeneratedFiles(directory: string): number {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, data);
   }
-  for (const leftover of leftoverRuleFiles(directory, files)) rmSync(resolve(directory, leftover));
+  for (const leftover of leftoverGeneratedFiles(directory, files)) rmSync(resolve(directory, leftover));
   return Object.keys(files).length;
 }
 

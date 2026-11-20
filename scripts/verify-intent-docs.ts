@@ -77,12 +77,49 @@ async function verifyLabels(page: Page): Promise<void> {
     assert.equal(await page.locator(`label[for="${id}"]`).count(), 1, `label for ${id}`);
 }
 
-/** The cards ship placeholder text; index.js must replace every one with its workflow JSON from index-workflows.js. */
-async function verifyWorkflowsHydrated(page: Page): Promise<void> {
-  const hydrated = await page
-    .locator('pre[data-workflow]')
-    .evaluateAll((blocks) => blocks.filter((block) => block.textContent?.trimStart().startsWith('{')).length);
-  assert.equal(hydrated, await page.locator('pre[data-workflow]').count(), 'workflow blocks left unfilled');
+/** Follow the visible links with page JavaScript disabled, then check every complete workflow. */
+async function verifyWorkflowPagesWithoutJavaScript(): Promise<void> {
+  const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 1440, height: 1000 } });
+  try {
+    const page = await context.newPage();
+    await page.route('http://**/*', (route) => route.abort());
+    await page.route('https://**/*', (route) => route.abort());
+    const index = pathToFileURL(resolve(import.meta.dir, '../docs/intents/index.html')).href;
+    await page.goto(index);
+    const targets = new Map<string, typeof catalogue.entries>();
+    for (const entry of catalogue.entries) {
+      const link = page.locator(`article[data-name="${entry.name}"] a.workflow-link`);
+      assert.equal(await link.count(), 1, entry.name);
+      const href = await link.getAttribute('href');
+      assert.ok(href, `workflow link for ${entry.name}`);
+      const file = new URL(href, index);
+      file.hash = '';
+      const entries = targets.get(file.href) ?? [];
+      entries.push(entry);
+      targets.set(file.href, entries);
+    }
+    for (const [file, entries] of targets) {
+      await page.goto(index);
+      const first = entries[0]!;
+      const card = page.locator(`article[data-name="${first.name}"]`);
+      await card.locator('> details > summary').click();
+      await card.locator('> details > details > summary').click();
+      await card.locator('a.workflow-link').click();
+      await page.waitForLoadState('load');
+      assert.equal(page.url().split('#')[0], file);
+      for (const entry of entries) {
+        const block = page.locator(`section[id="${entry.name}"] > pre`);
+        assert.equal(await block.isVisible(), true, entry.name);
+        assert.equal(await block.textContent(), JSON.stringify(entry.workflow, null, 2), entry.name);
+      }
+      assert.equal(await overflows(page), false, file);
+      await page.setViewportSize({ width: 360, height: 800 });
+      assert.equal(await overflows(page), false, `${file} mobile`);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
+  } finally {
+    await context.close();
+  }
 }
 
 /** Without any installed font Chromium lays text out at zero height, so every innerText read comes back empty. */
@@ -106,7 +143,7 @@ try {
   assert.equal(await overflows(page), false);
   await page.screenshot({ path: resolve(directory, 'catalogue-desktop.png') });
   await verifyLabels(page);
-  await verifyWorkflowsHydrated(page);
+  await verifyWorkflowPagesWithoutJavaScript();
   await verifyFilters(page);
   await verifySearchAndDetails(page);
   await verifyEngineAndLineage(page);
@@ -127,6 +164,7 @@ try {
       filters: true,
       details: true,
       engine: true,
+      workflowsWithoutJavaScript: true,
       desktopOverflow: false,
       mobileOverflow: false,
       images: [resolve(directory, 'catalogue-desktop.png'), resolve(directory, 'catalogue-mobile.png')],

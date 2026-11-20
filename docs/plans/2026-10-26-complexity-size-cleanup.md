@@ -1,6 +1,6 @@
 # Complexity and file-size cleanup
 
-Date: 2026-10-26. Status: implemented; review and ship tracked in the pull request.
+Date: 2026-10-26. Status: remaining acceptance work is tracked below and in the pull request.
 Tracking issue: [#860](https://github.com/alex-mextner/HyperCalendarBot/issues/860)
 
 ## Goal
@@ -14,8 +14,8 @@ changing runtime behavior, public exports, import paths, tests or data.
   complexity <= 15 and cyclomatic complexity <= 20 per function.
 - Physical file size: <= 1200 lines OK, > 1200 lines warning, > 2400 lines error.
 - Exempt from the size rule: `.json` files only (`exempt_extensions` in `rig.yaml`), plus binaries and
-  git-ignored files. `uv.lock` (1343 lines) is a generated lockfile and is NOT exempt: it stays as the one
-  reported warning (the checker cannot fix it, and a lockfile is never hand-edited or split).
+  git-ignored files. Generated lockfiles remain measured. The former `uv.lock` warning is addressed
+  by a native universal `requirements.lock` migration; no lockfile exemption or manual compaction is used.
 - Counted: tests, docs and source alike, plus untracked files that are not ignored
   (`git ls-files --cached --others --exclude-standard`).
 - Not allowed as a fix: minification, deleting comments/tests/docs content, raising thresholds,
@@ -101,3 +101,80 @@ Append-only: one dated row per measurement, never edit earlier rows.
 | 2026-10-26 | Complexity baseline (cognitive > 15, cyclomatic > 20), recursive over nested functions | 163 violating functions in 101 files (coordinator count; the immutable scan kept with the evidence lists 209 over-limit functions over 893 analysed files, a different enumeration) |
 | 2026-10-26 | Complexity after the cleanup | 0 violations over 1109 files, nested functions included, no suppressions, exclusions or raised thresholds |
 | 2026-10-26 | File size after the cleanup | 0 errors; the only file above 1200 lines is `uv.lock` (1343, generated lockfile, reported as a warning) |
+
+
+## Follow-up verification — 2026-10-29 (#860)
+
+The starting main is `bb7a9d4765e406b3c2c258fc4ad55445643857ac` (tree
+`b487d260a352a3fadcf862aa5c4fdd5354e05ed0`). Only criterion 4 was complete at
+the handoff; the hosted 8,585-test pass is not the required final server proof.
+
+- [x] Find a native, dependency-preserving replacement for the 1,343-line lock.
+  uv 0.12.24's universal requirements format is 942 lines and retains all 55
+  package versions, all 803 artifact hashes, the index and equivalent markers
+  and extras in every one of 36 marker truth partitions. The Python dependency
+  declarations are unchanged. See `docs/reference/python-dependencies.md`.
+- [ ] Review and ship the lock migration, then record the physical-line census
+  with the exact merged revision, including non-ignored untracked text files.
+- [ ] Audit each documentation split against its own original revision, restore
+  accidental lost bytes and explicitly list required link retargeting. Preserve
+  independently changed product documentation after the split.
+- [ ] Preserve original test names and assertions with per-file manifests, and
+  run frozen install, full Bun tests, lint and typecheck on server 65.21.40.51
+  against the final source-file manifest. Record all skips and environment setup.
+- [ ] Capture hosted scratch-branch runs for text at 2,400/2,401 lines, JSON over
+  2,400 lines, and the passing branch without the scratch artifacts. Keep the
+  deliberate failure out of main and retain the normal review and ship gates.
+
+
+## Verification evidence — 2026-10-31 (#860)
+
+The owned continuation starts from `bb7a9d4765e406b3c2c258fc4ad55445643857ac`.
+The source files and generated outputs below have passed focused verification;
+review, the exact final-tree server suite, hosted boundary proof and deployment
+remain separate acceptance gates.
+
+| Date | Metric | Result |
+| --- | --- | --- |
+| 2026-10-31 | Original document content | All 20 plan/spec families mapped with every hunk explicit; four Python fences restored from original bytes; 79 current paths match the recorded source hashes. The original complete Markdown and HTML renderings are byte-identical. All 52 Markdown cards and 52 pretty HTML workflow blocks retain their raw bytes, with 119 Markdown link retargets and 54 HTML relocations listed explicitly. |
+| 2026-10-31 | Focused generated-document runtime proof on Home | Frozen install, generation, original-model equality, freshness, actual Chromium with JavaScript-disabled navigation, 26 tests and 1,782 assertions, whole-repository lint and typecheck all passed. Every current generated physical page is at most 961 lines. This is not the required final server 65.21.40.51 full suite. |
+| 2026-10-31 | Original split test inventory | All 519 original names are mapped. 513 cases retain byte-identical assertion chains; six fixture/cast/addition differences are explicit. Original assertions 1,493 become 1,545 through 52 added assertions; independent later feature changes are kept separate. The original public-renderer test bodies and browser assertions remain unchanged after formatting. |
+
+Detailed comparisons: [document preservation](../reference/complexity-size-preservation.md),
+[byte and line metadata](../reference/complexity-size-preservation.json), and
+[original test preservation](../reference/complexity-test-preservation.md).
+The Python lock contract and the compiler's hash-validation limitation are documented
+in [Python dependency locks](../reference/python-dependencies.md).
+
+The isolated hosted proof branch must never merge. Its workflow generates the
+1,200/1,201/2,400/2,401-line text fixtures and the 2,401-line JSON fixture on the runner,
+then records native diagnostics and process exits. A verifier failure has its own
+exit 90; the verified 2,401-line text case remains a real failed run with native exit 1.
+No hosted outcome is claimed until that exact branch revision has actually run.
+
+## Subsequent measurements — 2026-10-31 22:01 UTC
+
+The entries above retain their measurement-time status. The hosted proof has now
+completed; the final committed-source full server gate and deployment remain open.
+
+| Date | Metric | Result |
+| --- | --- | --- |
+| 2026-10-31 | Full server attempt on staged tree `63a891b7705cf4b336270f29d2f039d4ecfa8328` | 8,567 passed, 16 existing Docker-dependent skips, three failed runtime cases across 521 files. Lint, typecheck and generated-document freshness passed. Source files and test inventories were unchanged. The failures were the old lock consumer and two installer fixtures that could not find the server's real Git executable. The failed result is retained. |
+| 2026-10-31 | Focused repair proof on server 65.21.40.51 | Both original installer suites pass (24 and 37 tests); the original lock test passes. All 62 names and 273 raw assertion calls/chains remain unchanged. Ruff format/check and Biome pass. Native uv 0.12.24 with Python 3.12.15 produces the same 55 pins, 803 hashes and byte-identical dependency body in 942 lines, with a generated project-version stamp. Wrong-stamp and bump-without-regeneration mutations each fail the real original equality assertion; restored inputs pass. |
+| 2026-10-31 | Hosted boundary source | All six actual runs use commit `72da5333259baf9a38958addd9bb89df0ec8f060`, tree `7eeb13f6c1be9cc4db25b626b50998baf8cb52a9`, attempt 1. The isolated branch must never merge. [Public measured evidence](https://github.com/alex-mextner/HyperCalendarBot/issues/860#issuecomment-6549644601). |
+| 2026-10-31 | Knip baseline comparison | Knip 6.44.1 reports the same diagnostic bytes on the staged candidate and `bb7a9d4`; both exit 1. A bounded comparison with latest stable 5.x, 5.88.1, also returns byte-identical candidate/base reports and exit 1. Version 5 recognizes the existing `classMembers` configuration, but the older unused-code findings remain. The failed check is tracked by existing [#564](https://github.com/alex-mextner/HyperCalendarBot/issues/564); no public export, rule, ignore entry or tool pin was changed to suppress it. |
+
+| Hosted case | Physical fixture lines | Fixture verdict | Scoped files considered | Native exit | Run |
+| --- | ---: | --- | ---: | ---: | --- |
+| No scratch fixture | absent | none | — | 0 | [41243872563](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41243872563) |
+| Text at lower boundary | 1200 | no diagnostic or skip | 1 | 0 | [41244033121](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41244033121) |
+| First warning | 1201 | warning, limit 1200 | 1 | 0 | [41244037336](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41244037336) |
+| Upper warning boundary | 2400 | warning, limit 1200 | 1 | 0 | [41244041777](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41244041777) |
+| First error | 2401 | error, limit 2400 | 1 | 1 | [41244046103](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41244046103) |
+| JSON exemption | 2401 | explicit `file_lines` / `exempt-extension` skip | 0 | 0 | [41244050562](https://github.com/alex-mextner/HyperCalendarBot/actions/runs/41244050562) |
+
+Every hosted verifier returned `ok: true`. The text-error run is an actual failed
+job with native exit 1 in both repository and fixture-scoped checks, not verifier
+exit 90. Thresholds remain 1200/2400 and the sole configured extension exemption
+is JSON. The normal task interface accepted only criterion 5 using the documented
+textual-CI-proof reason. The issue stays open with criteria 1, 2 and 3 unchecked.

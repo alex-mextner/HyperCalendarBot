@@ -62,15 +62,17 @@ STACK_TOUCHED=0
 STEP_PID=""
 WATCHDOG_PID=""
 
+# Fill finish's local status in the EXIT trap's shell. Command substitution here
+# can crash Bash after the watchdog interrupts read, before the final result line.
 result_status() {
   case "$1" in
-    0) echo passed ;;
-    2) echo refused ;;
-    3) echo not-provisioned ;;
-    4) echo infra-error ;;
-    75) echo lock-timeout ;;
-    76) echo superseded ;;
-    *) echo failed ;;
+    0) status=passed ;;
+    2) status=refused ;;
+    3) status=not-provisioned ;;
+    4) status=infra-error ;;
+    75) status=lock-timeout ;;
+    76) status=superseded ;;
+    *) status=failed ;;
   esac
 }
 
@@ -93,7 +95,7 @@ save_evidence() {
 # Runs on pass, fail, SIGTERM and timeout. The stage instance exists only while the locks are held,
 # so it is always removed here; logs and evidence are never deleted (log-retention.py owns that).
 finish() {
-  local rc=$?
+  local rc=$? status
   trap '' TERM INT HUP USR1
   trap - EXIT
   set +e
@@ -104,7 +106,8 @@ finish() {
   fi
   if ((LOADED)); then timeout 120 docker rmi "$IMAGE_REPO:$SHA" || true; fi
   if ((WORK_OWNED)); then rm -rf -- "$WORK"; fi
-  printf 'STAGE_QA_RESULT status=%s sha=%s cases=0 failed=0\n' "$(result_status "$rc")" "${SHA:--}" >&4
+  result_status "$rc"
+  printf 'STAGE_QA_RESULT status=%s sha=%s cases=0 failed=0\n' "$status" "${SHA:--}" >&4
   exit "$rc"
 }
 

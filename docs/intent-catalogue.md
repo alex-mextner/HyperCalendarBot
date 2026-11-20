@@ -5,7 +5,7 @@
 | Что нужно | Куда смотреть |
 |---|---|
 | Все правила, их шаги, привязки и происхождение от прежних правил | [Каталог для GitHub](intents/README.md) |
-| Та же информация с поиском и фильтрами (страница `index.html` с соседними `index.css`, `index.js`, `index-workflows.js`; работает офлайн из checkout, если рядом лежит `docs/intents/`) | [`intents/index.html`](intents/index.html) |
+| Та же информация с поиском и фильтрами (страница `index.html` с соседними `index.css`, `index.js` и каталогом `workflows/`; для офлайн-чтения сохраните весь `docs/intents/`) | [`intents/index.html`](intents/index.html) |
 | Как устроен движок: типизированные привязки, вопросы, подтверждение, доказательство записи, права | [Описание движка](intents/engine.md) |
 | Машиночитаемый каталог с отпечатком целевого сида | [`intents/catalogue.json`](intents/catalogue.json) |
 | План и история перестройки | [План](plans/2026-09-18-intent-redesign.md) |
@@ -15,12 +15,26 @@
 ## Как создать и пересобрать документацию
 
 ```bash
-bun run docs:intents          # пересобрать README.md, index.html и catalogue.json
+bun run docs:intents          # пересобрать все страницы, ресурсы и catalogue.json
 bun run docs:intents:check    # завершится ошибкой, если файлы отстали от исходников
 bun --no-env-file scripts/verify-intent-docs.ts   # проверить настоящую страницу в Chromium
 ```
 
 Русские заголовки правил лежат в [`scripts/intent-doc-labels.ts`](../scripts/intent-doc-labels.ts); без заголовка нового правила сборка падает. Обычный тестовый прогон проверяет свежесть файлов и то, что все относительные ссылки указывают на существующие файлы.
+
+Текущий результат сборки: `README.md`, `index.html`, `catalogue.json`, `index.css`,
+`index.js`, 15 Markdown-страниц в `rules/` и 15 HTML-страниц в `workflows/`.
+Полные workflow открываются по обычным ссылкам и доступны с отключённым JavaScript.
+В сохранённом историческом тексте каталога остаётся описание первоначальных трёх
+файлов; актуальный состав из 35 файлов указан здесь и проверяется генератором.
+
+Задача [#860](https://github.com/alex-mextner/HyperCalendarBot/issues/860) сохраняет
+исходные байты карточек и поведение публичных renderer-функций. Поэтому она также
+сохраняет известное двойное экранирование апострофов и исходные уровни заголовков.
+Исправление отображения апострофов ведётся в
+[#861](https://github.com/alex-mextner/HyperCalendarBot/issues/861); карта сохранённых
+байтов и добавленной навигации находится в
+[отчёте о разделении документов](reference/complexity-size-preservation.md).
 
 ## Безопасное применение сида к базе
 

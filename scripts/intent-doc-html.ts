@@ -16,7 +16,7 @@ import {
   tally,
 } from './intent-doc-catalogue.ts';
 import { categoryTitles, dispositionTitles, riskTitles } from './intent-doc-labels.ts';
-import { CORPUS_NOTE, lineageSummary, pageOf, planRulePages, ruleFiles } from './intent-doc-markdown.ts';
+import { CORPUS_NOTE, lineageSummary, pageOf } from './intent-doc-markdown.ts';
 import {
   categoryTitle,
   checkSummary,
@@ -28,6 +28,7 @@ import {
   riskTitle,
   viewOf,
 } from './intent-doc-text.ts';
+import { renderWorkflowBlock, renderWorkflowPages, workflowFiles } from './intent-doc-workflows.ts';
 
 export function readEngineMarkdown(): string {
   return readFileSync(resolve(DOCS_DIRECTORY, 'engine.md'), 'utf8');
@@ -71,7 +72,7 @@ function listHtml(items: readonly string[], tag: 'ul' | 'ol' = 'ul'): string {
   return `<${tag}>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</${tag}>`;
 }
 
-function renderCardDetails(entry: CatalogueEntry, page: string): string {
+function renderCardDetails(entry: CatalogueEntry, page?: string): string {
   const view = viewOf(entry.workflow);
   const steps = view.steps.map((step) => `<li>${htmlOf(describeStep(step, view.ru))}</li>`).join('');
   const bindings = view.bindings
@@ -93,7 +94,7 @@ function renderCardDetails(entry: CatalogueEntry, page: string): string {
     bindings ? `<h4>Привязки</h4><ul>${bindings}</ul>` : '',
     predecessors ? `<h4>Заменяет прежние правила</h4><ul>${predecessors}</ul>` : '',
     `<h4>Проверка при сборке</h4><p>${escapeHtml(checkSummary(entry))}</p>`,
-    `<details><summary>Регулярное выражение и полный workflow (JSON)</summary><pre>${escapeHtml(entry.pattern)}</pre><pre data-workflow="${escapeHtml(entry.name)}">Без JavaScript workflow не подставляется: полный текст лежит <a href="${escapeHtml(page)}#${escapeHtml(entry.name)}">на странице правила</a>.</pre></details>`,
+    `<details><summary>Регулярное выражение и полный workflow (JSON)</summary><pre>${escapeHtml(entry.pattern)}</pre>${page ? `<p><a class="workflow-link" href="${escapeHtml(page)}#${escapeHtml(entry.name)}">Full workflow (JSON)</a></p>` : renderWorkflowBlock(entry)}</details>`,
   ].join('');
 }
 
@@ -111,7 +112,7 @@ function searchText(entry: CatalogueEntry): string {
     .toLowerCase();
 }
 
-function renderCard(entry: CatalogueEntry, page: string): string {
+function renderCard(entry: CatalogueEntry, page?: string): string {
   const note = entry.notes
     ? `<p><small>Пометка из исходника (по-английски): ${escapeHtml(entry.notes)}</small></p>`
     : '';
@@ -181,35 +182,34 @@ function renderHeader(c: Catalogue): string {
   return `<p class="brand">HyperCalendar</p><h1>Правила интентов: единый сид и движок</h1><p class="lead">Целевой набор из ${c.entries.length} правил, собранный из исходного кода. Правило распознаёт фразу, проверяет параметры и вызывает те же инструменты календаря, что доступны AI.</p><aside class="notice" role="note"><strong>Это целевой сид, а не отчёт о развёртывании.</strong> Страница строится из исходников и не видит базу. Установку подтверждает отдельная проверка живой базы: отпечаток <code>${c.fingerprint}</code> должен совпасть со значением в <code>intent_basis_manifest</code>. Ссылки: <a href="README.md">каталог для GitHub</a>, <a href="engine.md">описание движка</a>, <a href="catalogue.json">машиночитаемый каталог</a>, <a href="../intent-catalogue.md">заметки по приватному отчёту</a>.</aside>${renderMetrics(c)}<nav class="jump" aria-label="Разделы страницы"><a href="#engine">Движок</a><a href="#catalogue">Каталог правил</a><a href="#lineage">Происхождение</a></nav>`;
 }
 
-/** JSON for a classic script: `<` and the two line separators are written as escapes so `<!--` can never comment out a row. */
-const scriptJson = (value: unknown): string =>
-  JSON.stringify(value).replace(/[<\u2028\u2029]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
-
-/** One compact workflow per rule; index.js pretty-prints it into the card, matching the JSON on the rule pages. */
-function renderWorkflowData(c: Catalogue): string {
-  const rows = c.entries.map((entry) => `  ${scriptJson(entry.name)}: ${scriptJson(entry.workflow)}`);
-  return `${ASSET_BANNER}\nwindow.INTENT_WORKFLOWS = {\n${rows.join(',\n')}\n};\n`;
+function renderHead(inlineAssets: boolean): string {
+  return `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HyperCalendar: правила интентов и движок</title>${inlineAssets ? `<style>${HTML_STYLES}</style>` : `<link rel="stylesheet" href="${HTML_ASSET_FILES.styles}">`}`;
 }
 
-function renderHead(): string {
-  return `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HyperCalendar: правила интентов и движок</title><link rel="stylesheet" href="${HTML_ASSET_FILES.styles}">`;
-}
-
-export function renderHtml(c: Catalogue, engine: string = readEngineMarkdown()): string {
-  const files = ruleFiles(planRulePages(c));
+function renderHtmlPage(c: Catalogue, engine: string, files?: Map<string, string>): string {
   const cards = groupByCategory(c.entries)
     .flatMap((group) => group.entries)
-    .map((entry) => renderCard(entry, pageOf(files, entry.name)))
+    .map((entry) => renderCard(entry, files ? pageOf(files, entry.name) : undefined))
     .join('\n');
   const total = c.entries.length;
-  return `<!doctype html><html lang="ru"><head>${renderHead()}</head><body><a class="skip" href="#catalogue">Перейти к каталогу</a><main>${renderHeader(c)}<section id="engine" aria-label="Описание движка">${renderEngineHtml(engine)}${renderBindingTypesHtml(c)}</section><section id="catalogue" aria-labelledby="catalogue-title"><h2 id="catalogue-title">Каталог правил</h2>${renderFilters(c)}<p id="count" role="status" aria-live="polite">Показано: ${total} из ${total}</p><p id="empty" hidden>Ничего не найдено. Измени запрос или сбрось фильтры.</p><div class="grid">${cards}</div></section>${renderLineageHtml(c)}<footer>Отпечаток целевого сида: <code>${c.fingerprint}</code><br>Пересборка: <code>bun run docs:intents</code>; проверка: <code>bun run docs:intents:check</code>. ${escapeHtml(CORPUS_NOTE)} Идентификаторов Telegram и текста переписок здесь нет.</footer></main><script src="${HTML_ASSET_FILES.workflows}"></script><script src="${HTML_ASSET_FILES.script}"></script></body></html>\n`;
+  return `<!doctype html><html lang="ru"><head>${renderHead(files === undefined)}</head><body><a class="skip" href="#catalogue">Перейти к каталогу</a><main>${renderHeader(c)}<section id="engine" aria-label="Описание движка">${renderEngineHtml(engine)}${renderBindingTypesHtml(c)}</section><section id="catalogue" aria-labelledby="catalogue-title"><h2 id="catalogue-title">Каталог правил</h2>${renderFilters(c)}<p id="count" role="status" aria-live="polite">Показано: ${total} из ${total}</p><p id="empty" hidden>Ничего не найдено. Измени запрос или сбрось фильтры.</p><div class="grid">${cards}</div></section>${renderLineageHtml(c)}<footer>Отпечаток целевого сида: <code>${c.fingerprint}</code><br>Пересборка: <code>bun run docs:intents</code>; проверка: <code>bun run docs:intents:check</code>. ${escapeHtml(CORPUS_NOTE)} Идентификаторов Telegram и текста переписок здесь нет.</footer></main>${files === undefined ? `<script>${HTML_SCRIPT}</script>` : `<script src="${HTML_ASSET_FILES.script}"></script>`}</body></html>\n`;
 }
 
-/** index.css, index.js and the workflow data the page script renders into every card. */
+/** The public renderer remains self-contained, with inline styles, filter script and complete pretty workflows. */
+export function renderHtml(c: Catalogue, engine: string = readEngineMarkdown()): string {
+  return renderHtmlPage(c, engine);
+}
+
+/** The committed entry page links to complete, readable workflow pages. */
+export function renderHtmlIndex(c: Catalogue, engine: string = readEngineMarkdown()): string {
+  return renderHtmlPage(c, engine, workflowFiles(c));
+}
+
+/** Shared styles, the original filter script, and readable workflow pages. */
 export function renderHtmlAssets(c: Catalogue): { [file: string]: string } {
   return {
     [HTML_ASSET_FILES.styles]: `${ASSET_BANNER}${HTML_STYLES}`,
     [HTML_ASSET_FILES.script]: `${ASSET_BANNER}${HTML_SCRIPT}`,
-    [HTML_ASSET_FILES.workflows]: renderWorkflowData(c),
+    ...renderWorkflowPages(c),
   };
 }

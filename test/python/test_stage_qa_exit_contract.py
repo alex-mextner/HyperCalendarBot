@@ -8,6 +8,7 @@ the wrapper are installed by hand), so a drifting table would post a wrong verdi
 
 import importlib.util
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -30,10 +31,27 @@ finally:
 
 def result_status_table(script):
     body = re.search(r"result_status\(\) \{\n  case .*?\n  esac\n\}", script, re.DOTALL).group(0)
-    return {
-        int(code): name
-        for code, name in re.findall(r"^\s+(\d+)\) echo ([a-z-]+) ;;$", body, re.MULTILINE)
-    }
+    codes = re.findall(r"^\s+(\d+)\)", body, re.MULTILINE)
+    # Exercise the shell mapping with the same caller-local status as finish().
+    command = (
+        body
+        + """
+emit_status() {
+  local status
+  result_status "$1"
+  printf '%s %s\\n' "$1" "$status"
+}
+for code in "$@"; do emit_status "$code"; done
+"""
+    )
+    done = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", command, "result-status-table", *codes],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    return {int(code): name for code, name in (line.split() for line in done.stdout.splitlines())}
 
 
 class ExitCodeTable(unittest.TestCase):
