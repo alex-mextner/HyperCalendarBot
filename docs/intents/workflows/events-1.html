@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>События (1/2) — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="slots.html">Previous: Свободное время</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="events-2.html">Next: События (2/2)</a></nav>
+<h1>События (1/2)</h1>
+<section id="basis.event.create"><h2>Создать событие с названием, днём и временем</h2><p><code>basis.event.create</code> · <a href="../index.html#basis.event.create">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;ev&quot;: {
+      &quot;type&quot;: &quot;event_phrase&quot;,
+      &quot;from&quot;: &quot;{{$1}}&quot;,
+      &quot;date&quot;: &quot;require&quot;,
+      &quot;time&quot;: &quot;require&quot;,
+      &quot;span&quot;: &quot;allow&quot;,
+      &quot;future&quot;: true
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;get_free_slots&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{bind.ev.date}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;availability&quot;
+    },
+    {
+      &quot;when&quot;: &quot;fits(availability, bind.ev.start, bind.ev.end)&quot;,
+      &quot;call&quot;: &quot;ask_user&quot;,
+      &quot;input&quot;: {
+        &quot;question&quot;: &quot;{{t.q_free}}&quot;,
+        &quot;options&quot;: [
+          &quot;{{t.ok}}&quot;,
+          &quot;{{t.cancel}}&quot;
+        ]
+      },
+      &quot;as&quot;: &quot;confirm|lower&quot;
+    },
+    {
+      &quot;when&quot;: &quot;fits(availability, bind.ev.start, bind.ev.end) == false&quot;,
+      &quot;call&quot;: &quot;ask_user&quot;,
+      &quot;input&quot;: {
+        &quot;question&quot;: &quot;{{t.q_clash}}&quot;,
+        &quot;options&quot;: [
+          &quot;{{t.ok}}&quot;,
+          &quot;{{t.cancel}}&quot;
+        ]
+      },
+      &quot;as&quot;: &quot;confirm|lower&quot;
+    },
+    {
+      &quot;when&quot;: &quot;ask.confirm != &#39;да&#39; &amp;&amp; ask.confirm != &#39;yes&#39;&quot;,
+      &quot;respond&quot;: &quot;{{t.cancelled}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.ev.has_end == false&quot;,
+      &quot;call&quot;: &quot;create_event&quot;,
+      &quot;input&quot;: {
+        &quot;title&quot;: &quot;{{bind.ev.title}}&quot;,
+        &quot;start_at&quot;: &quot;{{bind.ev.start}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;when&quot;: &quot;bind.ev.has_end == true&quot;,
+      &quot;call&quot;: &quot;create_event&quot;,
+      &quot;input&quot;: {
+        &quot;title&quot;: &quot;{{bind.ev.title}}&quot;,
+        &quot;start_at&quot;: &quot;{{bind.ev.start}}&quot;,
+        &quot;end_at&quot;: &quot;{{bind.ev.end}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.done}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;cancelled&quot;: &quot;Отменено, ничего не изменилось.&quot;,
+      &quot;ok&quot;: &quot;Да&quot;,
+      &quot;cancel&quot;: &quot;Отмена&quot;,
+      &quot;q_free&quot;: &quot;Создать «{{bind.ev.title}}» {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}?&quot;,
+      &quot;q_clash&quot;: &quot;Создать «{{bind.ev.title}}» {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}? В это время уже что-то есть. Свободные окна дня:\n{{tool_outputs.availability_text}}&quot;,
+      &quot;done&quot;: &quot;Готово: создал «{{bind.ev.title}}» — {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;cancelled&quot;: &quot;Cancelled, nothing was changed.&quot;,
+      &quot;ok&quot;: &quot;Yes&quot;,
+      &quot;cancel&quot;: &quot;Cancel&quot;,
+      &quot;q_free&quot;: &quot;Create “{{bind.ev.title}}” {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}?&quot;,
+      &quot;q_clash&quot;: &quot;Create “{{bind.ev.title}}” {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}? Something else is scheduled then. Free windows that day:\n{{tool_outputs.availability_text}}&quot;,
+      &quot;done&quot;: &quot;Done: created “{{bind.ev.title}}” — {{bind.ev.when_text}}{{bind.ev.end_suffix|default(\&quot;\&quot;)}}.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.event.show"><h2>Показать одно событие по номеру или точному названию</h2><p><code>basis.event.show</code> · <a href="../index.html#basis.event.show">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;ref&quot;: {
+      &quot;type&quot;: &quot;eventref&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;reject&quot;: [
+        &quot;все&quot;,
+        &quot;всё&quot;,
+        &quot;всех&quot;,
+        &quot;all&quot;,
+        &quot;every&quot;,
+        &quot;everything&quot;,
+        &quot;любое&quot;,
+        &quot;любую&quot;,
+        &quot;любой&quot;,
+        &quot;каждое&quot;,
+        &quot;каждую&quot;,
+        &quot;каждый&quot;,
+        &quot;each&quot;,
+        &quot;both&quot;,
+        &quot;оба&quot;,
+        &quot;обе&quot;
+      ],
+      &quot;stem&quot;: true
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;id&#39;&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{bind.ref.id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;call&quot;: &quot;search_events&quot;,
+      &quot;input&quot;: {
+        &quot;query&quot;: &quot;{{bind.ref.query}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;,
+        &quot;event_type&quot;: &quot;regular&quot;
+      },
+      &quot;as&quot;: &quot;found&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 0 &amp;&amp; bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;abstain&quot;: true
+    },
+    {
+      &quot;when&quot;: &quot;count(found) &gt; 1&quot;,
+      &quot;respond&quot;: &quot;{{t.ambiguous}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 1&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.found[0].id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;ambiguous&quot;: &quot;Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}&quot;
+    },
+    &quot;en&quot;: {
+      &quot;ambiguous&quot;: &quot;Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.event.reschedule"><h2>Перенести событие на явный день и время</h2><p><code>basis.event.reschedule</code> · <a href="../index.html#basis.event.reschedule">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;ev&quot;: {
+      &quot;type&quot;: &quot;event_phrase&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;reference&quot;: true,
+      &quot;reject&quot;: [
+        &quot;все&quot;,
+        &quot;всё&quot;,
+        &quot;всех&quot;,
+        &quot;all&quot;,
+        &quot;every&quot;,
+        &quot;everything&quot;,
+        &quot;любое&quot;,
+        &quot;любую&quot;,
+        &quot;любой&quot;,
+        &quot;каждое&quot;,
+        &quot;каждую&quot;,
+        &quot;каждый&quot;,
+        &quot;each&quot;,
+        &quot;both&quot;,
+        &quot;оба&quot;,
+        &quot;обе&quot;
+      ]
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;bind.ev.ref.kind == &#39;id&#39;&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{bind.ev.ref.id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.ev.ref.kind == &#39;name&#39;&quot;,
+      &quot;call&quot;: &quot;search_events&quot;,
+      &quot;input&quot;: {
+        &quot;query&quot;: &quot;{{bind.ev.ref.query}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;,
+        &quot;event_type&quot;: &quot;regular&quot;
+      },
+      &quot;as&quot;: &quot;found&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 0 &amp;&amp; bind.ev.ref.kind == &#39;name&#39;&quot;,
+      &quot;abstain&quot;: true
+    },
+    {
+      &quot;when&quot;: &quot;count(found) &gt; 1&quot;,
+      &quot;respond&quot;: &quot;{{t.ambiguous}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 1&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.found[0].id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;call&quot;: &quot;plan_move&quot;,
+      &quot;input&quot;: {
+        &quot;date&quot;: &quot;{{tool_outputs.target.date|default(\&quot;\&quot;)}}&quot;,
+        &quot;time&quot;: &quot;{{tool_outputs.target.time|default(\&quot;\&quot;)}}&quot;,
+        &quot;end_at&quot;: &quot;{{tool_outputs.target.end_at|default(\&quot;\&quot;)}}&quot;,
+        &quot;day&quot;: &quot;{{bind.ev.date|default(\&quot;\&quot;)}}&quot;,
+        &quot;at&quot;: &quot;{{bind.ev.time|default(\&quot;\&quot;)}}&quot;
+      },
+      &quot;as&quot;: &quot;plan&quot;
+    },
+    {
+      &quot;call&quot;: &quot;ask_user&quot;,
+      &quot;input&quot;: {
+        &quot;question&quot;: &quot;{{t.q}}&quot;,
+        &quot;options&quot;: [
+          &quot;{{t.ok}}&quot;,
+          &quot;{{t.cancel}}&quot;
+        ]
+      },
+      &quot;as&quot;: &quot;confirm|lower&quot;
+    },
+    {
+      &quot;when&quot;: &quot;ask.confirm != &#39;да&#39; &amp;&amp; ask.confirm != &#39;yes&#39;&quot;,
+      &quot;respond&quot;: &quot;{{t.cancelled}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;has(tool_outputs.plan.end)&quot;,
+      &quot;call&quot;: &quot;update_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.target.id}}&quot;,
+        &quot;start_at&quot;: &quot;{{tool_outputs.plan.start}}&quot;,
+        &quot;end_at&quot;: &quot;{{tool_outputs.plan.end}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;when&quot;: &quot;has(tool_outputs.plan.end) == false&quot;,
+      &quot;call&quot;: &quot;update_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.target.id}}&quot;,
+        &quot;start_at&quot;: &quot;{{tool_outputs.plan.start}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.done}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;ambiguous&quot;: &quot;Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Отменено, ничего не изменилось.&quot;,
+      &quot;ok&quot;: &quot;Да&quot;,
+      &quot;cancel&quot;: &quot;Отмена&quot;,
+      &quot;target&quot;: &quot;«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; в \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Перенести {{t.target}} на {{tool_outputs.plan.when_text}}?&quot;,
+      &quot;done&quot;: &quot;Готово: перенёс «{{tool_outputs.target.title}}» на {{tool_outputs.plan.when_text}}.&quot;
+    },
+    &quot;en&quot;: {
+      &quot;ambiguous&quot;: &quot;Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Cancelled, nothing was changed.&quot;,
+      &quot;ok&quot;: &quot;Yes&quot;,
+      &quot;cancel&quot;: &quot;Cancel&quot;,
+      &quot;target&quot;: &quot;“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; at \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Move {{t.target}} to {{tool_outputs.plan.when_text}}?&quot;,
+      &quot;done&quot;: &quot;Done: moved “{{tool_outputs.target.title}}” to {{tool_outputs.plan.when_text}}.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.event.rename"><h2>Переименовать событие</h2><p><code>basis.event.rename</code> · <a href="../index.html#basis.event.rename">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;ref&quot;: {
+      &quot;type&quot;: &quot;eventref&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}{{$3|default(\&quot;\&quot;)}}&quot;,
+      &quot;reject&quot;: [
+        &quot;все&quot;,
+        &quot;всё&quot;,
+        &quot;всех&quot;,
+        &quot;all&quot;,
+        &quot;every&quot;,
+        &quot;everything&quot;,
+        &quot;любое&quot;,
+        &quot;любую&quot;,
+        &quot;любой&quot;,
+        &quot;каждое&quot;,
+        &quot;каждую&quot;,
+        &quot;каждый&quot;,
+        &quot;each&quot;,
+        &quot;both&quot;,
+        &quot;оба&quot;,
+        &quot;обе&quot;
+      ],
+      &quot;stem&quot;: true
+    },
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$2|default(\&quot;\&quot;)}}{{$4|default(\&quot;\&quot;)}}&quot;,
+      &quot;max&quot;: 200,
+      &quot;capitalize&quot;: true
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;id&#39;&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{bind.ref.id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;call&quot;: &quot;search_events&quot;,
+      &quot;input&quot;: {
+        &quot;query&quot;: &quot;{{bind.ref.query}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;,
+        &quot;event_type&quot;: &quot;regular&quot;
+      },
+      &quot;as&quot;: &quot;found&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 0 &amp;&amp; bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;abstain&quot;: true
+    },
+    {
+      &quot;when&quot;: &quot;count(found) &gt; 1&quot;,
+      &quot;respond&quot;: &quot;{{t.ambiguous}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 1&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.found[0].id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;call&quot;: &quot;ask_user&quot;,
+      &quot;input&quot;: {
+        &quot;question&quot;: &quot;{{t.q}}&quot;,
+        &quot;options&quot;: [
+          &quot;{{t.ok}}&quot;,
+          &quot;{{t.cancel}}&quot;
+        ]
+      },
+      &quot;as&quot;: &quot;confirm|lower&quot;
+    },
+    {
+      &quot;when&quot;: &quot;ask.confirm != &#39;да&#39; &amp;&amp; ask.confirm != &#39;yes&#39;&quot;,
+      &quot;respond&quot;: &quot;{{t.cancelled}}&quot;
+    },
+    {
+      &quot;call&quot;: &quot;update_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.target.id}}&quot;,
+        &quot;title&quot;: &quot;{{bind.title}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.done}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;ambiguous&quot;: &quot;Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Отменено, ничего не изменилось.&quot;,
+      &quot;ok&quot;: &quot;Да&quot;,
+      &quot;cancel&quot;: &quot;Отмена&quot;,
+      &quot;target&quot;: &quot;«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; в \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Переименовать {{t.target}} в «{{bind.title}}»?&quot;,
+      &quot;done&quot;: &quot;Готово: переименовал «{{tool_outputs.target.title}}» в «{{bind.title}}».&quot;
+    },
+    &quot;en&quot;: {
+      &quot;ambiguous&quot;: &quot;Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Cancelled, nothing was changed.&quot;,
+      &quot;ok&quot;: &quot;Yes&quot;,
+      &quot;cancel&quot;: &quot;Cancel&quot;,
+      &quot;target&quot;: &quot;“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; at \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Rename {{t.target}} to “{{bind.title}}”?&quot;,
+      &quot;done&quot;: &quot;Done: renamed “{{tool_outputs.target.title}}” to “{{bind.title}}”.&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.event.set_detail"><h2>Изменить место или описание события</h2><p><code>basis.event.set_detail</code> · <a href="../index.html#basis.event.set_detail">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;field&quot;: {
+      &quot;type&quot;: &quot;enum&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}{{$4|default(\&quot;\&quot;)}}{{$8|default(\&quot;\&quot;)}}&quot;,
+      &quot;values&quot;: {
+        &quot;место&quot;: &quot;location&quot;,
+        &quot;локацию&quot;: &quot;location&quot;,
+        &quot;локация&quot;: &quot;location&quot;,
+        &quot;адрес&quot;: &quot;location&quot;,
+        &quot;описание&quot;: &quot;description&quot;,
+        &quot;location&quot;: &quot;location&quot;,
+        &quot;place&quot;: &quot;location&quot;,
+        &quot;address&quot;: &quot;location&quot;,
+        &quot;venue&quot;: &quot;location&quot;,
+        &quot;description&quot;: &quot;description&quot;
+      }
+    },
+    &quot;ref&quot;: {
+      &quot;type&quot;: &quot;eventref&quot;,
+      &quot;from&quot;: &quot;{{$2|default(\&quot;\&quot;)}}{{$5|default(\&quot;\&quot;)}}{{$7|default(\&quot;\&quot;)}}&quot;,
+      &quot;reject&quot;: [
+        &quot;все&quot;,
+        &quot;всё&quot;,
+        &quot;всех&quot;,
+        &quot;all&quot;,
+        &quot;every&quot;,
+        &quot;everything&quot;,
+        &quot;любое&quot;,
+        &quot;любую&quot;,
+        &quot;любой&quot;,
+        &quot;каждое&quot;,
+        &quot;каждую&quot;,
+        &quot;каждый&quot;,
+        &quot;each&quot;,
+        &quot;both&quot;,
+        &quot;оба&quot;,
+        &quot;обе&quot;
+      ],
+      &quot;stem&quot;: true
+    },
+    &quot;value&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$3|default(\&quot;\&quot;)}}{{$6|default(\&quot;\&quot;)}}{{$9|default(\&quot;\&quot;)}}&quot;,
+      &quot;max&quot;: 300
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;id&#39;&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{bind.ref.id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;call&quot;: &quot;search_events&quot;,
+      &quot;input&quot;: {
+        &quot;query&quot;: &quot;{{bind.ref.query}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;,
+        &quot;event_type&quot;: &quot;regular&quot;
+      },
+      &quot;as&quot;: &quot;found&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 0 &amp;&amp; bind.ref.kind == &#39;name&#39;&quot;,
+      &quot;abstain&quot;: true
+    },
+    {
+      &quot;when&quot;: &quot;count(found) &gt; 1&quot;,
+      &quot;respond&quot;: &quot;{{t.ambiguous}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;count(found) == 1&quot;,
+      &quot;call&quot;: &quot;get_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.found[0].id}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      },
+      &quot;as&quot;: &quot;target&quot;
+    },
+    {
+      &quot;call&quot;: &quot;ask_user&quot;,
+      &quot;input&quot;: {
+        &quot;question&quot;: &quot;{{t.q}}&quot;,
+        &quot;options&quot;: [
+          &quot;{{t.ok}}&quot;,
+          &quot;{{t.cancel}}&quot;
+        ]
+      },
+      &quot;as&quot;: &quot;confirm|lower&quot;
+    },
+    {
+      &quot;when&quot;: &quot;ask.confirm != &#39;да&#39; &amp;&amp; ask.confirm != &#39;yes&#39;&quot;,
+      &quot;respond&quot;: &quot;{{t.cancelled}}&quot;
+    },
+    {
+      &quot;when&quot;: &quot;bind.field == &#39;location&#39;&quot;,
+      &quot;call&quot;: &quot;update_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.target.id}}&quot;,
+        &quot;location&quot;: &quot;{{bind.value}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;when&quot;: &quot;bind.field == &#39;description&#39;&quot;,
+      &quot;call&quot;: &quot;update_event&quot;,
+      &quot;input&quot;: {
+        &quot;event_id&quot;: &quot;{{tool_outputs.target.id}}&quot;,
+        &quot;description&quot;: &quot;{{bind.value}}&quot;,
+        &quot;scope&quot;: &quot;{{env.scope}}&quot;
+      }
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.done}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;ambiguous&quot;: &quot;Нашёл несколько подходящих событий. Повтори команду с номером (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Отменено, ничего не изменилось.&quot;,
+      &quot;ok&quot;: &quot;Да&quot;,
+      &quot;cancel&quot;: &quot;Отмена&quot;,
+      &quot;target&quot;: &quot;«{{tool_outputs.target.title}}» ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; в \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Поставить {{bind.field|eq(\&quot;location\&quot;,\&quot;место\&quot;,\&quot;описание\&quot;)}} у {{t.target}}: «{{bind.value}}»?&quot;,
+      &quot;done&quot;: &quot;Готово: у «{{tool_outputs.target.title}}» теперь {{bind.field|eq(\&quot;location\&quot;,\&quot;место\&quot;,\&quot;описание\&quot;)}}: «{{bind.value}}».&quot;
+    },
+    &quot;en&quot;: {
+      &quot;ambiguous&quot;: &quot;Several events match. Repeat the command with the number (#id):\n{{tool_outputs.found_text}}&quot;,
+      &quot;cancelled&quot;: &quot;Cancelled, nothing was changed.&quot;,
+      &quot;ok&quot;: &quot;Yes&quot;,
+      &quot;cancel&quot;: &quot;Cancel&quot;,
+      &quot;target&quot;: &quot;“{{tool_outputs.target.title}}” ({{tool_outputs.target.date|human_day}}{{tool_outputs.target.time|default(\&quot;\&quot;)|ternary(\&quot; at \&quot;, \&quot;\&quot;)}}{{tool_outputs.target.time|default(\&quot;\&quot;)}})&quot;,
+      &quot;q&quot;: &quot;Set the {{bind.field}} of {{t.target}} to “{{bind.value}}”?&quot;,
+      &quot;done&quot;: &quot;Done: the {{bind.field}} of “{{tool_outputs.target.title}}” is now “{{bind.value}}”.&quot;
+    }
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="slots.html">Previous: Свободное время</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="events-2.html">Next: События (2/2)</a></nav>
+</main></body></html>

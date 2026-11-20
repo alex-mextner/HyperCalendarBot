@@ -17,6 +17,7 @@ from odroid_stage_qa_support import (
     INSTALLER,
     LIB_FILES,
     RUN,
+    SAFE_PATH,
     HeldLock,
     rewrite,
 )
@@ -47,6 +48,14 @@ class Installer(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        git = shutil.which("git")
+        if git is None:
+            raise RuntimeError("Git is required for installer regression tests")
+        self.git_executable = Path(git).resolve()
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        # Exercise the real Git guards even when Git lives outside /usr/bin.
+        (self.bin / "git").symlink_to(self.git_executable)
         self.src = self.tmp / "checkout"
         (self.src / "scripts").mkdir(parents=True)
         self.lib = self.tmp / "usr/lib/hypercal-stage"
@@ -86,6 +95,10 @@ class Installer(unittest.TestCase):
                 ),
                 ("readonly STAGE_LOCK_WAIT=60\n", "readonly STAGE_LOCK_WAIT=1\n"),
                 (
+                    f"readonly SAFE_PATH={SAFE_PATH}\n",
+                    f"readonly SAFE_PATH={self.bin}:{SAFE_PATH}\n",
+                ),
+                (
                     "readonly DRIVER_CONFIG=/etc/hypercal-stage-qa/driver.json\n",
                     f"readonly DRIVER_CONFIG={self.config}\n",
                 ),
@@ -121,7 +134,16 @@ class Installer(unittest.TestCase):
 
     def git(self, *args):
         subprocess.run(
-            ["git", "-C", str(self.src), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            [
+                str(self.git_executable),
+                "-C",
+                str(self.src),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                *args,
+            ],
             check=True,
             capture_output=True,
         )

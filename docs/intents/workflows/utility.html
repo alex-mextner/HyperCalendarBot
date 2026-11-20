@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Время и вычисления — HyperCalendar workflows</title><link rel="stylesheet" href="../index.css"></head><body><main>
+<nav aria-label="Workflow pages"><a href="memory.html">Previous: Память</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="google.html">Next: Google Календарь</a></nav>
+<h1>Время и вычисления</h1>
+<section id="basis.time.now"><h2>Текущее время здесь или в городе</h2><p><code>basis.time.now</code> · <a href="../index.html#basis.time.now">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;city&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$1|default(\&quot;\&quot;)}}&quot;,
+      &quot;max&quot;: 40,
+      &quot;optional&quot;: true,
+      &quot;default&quot;: &quot;&quot;
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;when&quot;: &quot;bind.city == &#39;&#39;&quot;,
+      &quot;call&quot;: &quot;get_timezone_info&quot;,
+      &quot;input&quot;: {
+        &quot;timezone&quot;: &quot;{{user.timezone}}&quot;
+      }
+    },
+    {
+      &quot;when&quot;: &quot;bind.city != &#39;&#39;&quot;,
+      &quot;call&quot;: &quot;get_timezone_info&quot;,
+      &quot;input&quot;: {
+        &quot;timezone&quot;: &quot;{{bind.city}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {},
+    &quot;en&quot;: {}
+  }
+}</pre>
+</section>
+<section id="basis.time.convert"><h2>Перевести моё время сегодня в другой часовой пояс</h2><p><code>basis.time.convert</code> · <a href="../index.html#basis.time.convert">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;d&quot;: {
+      &quot;type&quot;: &quot;date&quot;,
+      &quot;from&quot;: &quot;today&quot;,
+      &quot;words&quot;: {
+        &quot;today&quot;: &quot;today&quot;
+      }
+    },
+    &quot;at&quot;: {
+      &quot;type&quot;: &quot;time&quot;,
+      &quot;from&quot;: &quot;{{$1}}&quot;
+    },
+    &quot;when&quot;: {
+      &quot;type&quot;: &quot;datetime&quot;,
+      &quot;date&quot;: &quot;d&quot;,
+      &quot;time&quot;: &quot;at&quot;
+    },
+    &quot;tz&quot;: {
+      &quot;type&quot;: &quot;timezone&quot;,
+      &quot;from&quot;: &quot;{{$2}}&quot;
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;convert_to_timezone&quot;,
+      &quot;input&quot;: {
+        &quot;datetime&quot;: &quot;{{bind.when}}&quot;,
+        &quot;timezone&quot;: &quot;{{bind.tz}}&quot;
+      },
+      &quot;as&quot;: &quot;c&quot;
+    },
+    {
+      &quot;respond&quot;: &quot;{{t.out}}&quot;
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {
+      &quot;out&quot;: &quot;{{tool_outputs.c.local_datetime}} ({{tool_outputs.c.timezone}})&quot;
+    },
+    &quot;en&quot;: {
+      &quot;out&quot;: &quot;{{tool_outputs.c.local_datetime}} ({{tool_outputs.c.timezone}})&quot;
+    }
+  }
+}</pre>
+</section>
+<section id="basis.calc.evaluate"><h2>Вычислить арифметическое выражение</h2><p><code>basis.calc.evaluate</code> · <a href="../index.html#basis.calc.evaluate">Back to rule</a></p>
+<pre>{
+  &quot;version&quot;: 2,
+  &quot;bindings&quot;: {
+    &quot;expr&quot;: {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;from&quot;: &quot;{{$1}}&quot;,
+      &quot;max&quot;: 100
+    }
+  },
+  &quot;steps&quot;: [
+    {
+      &quot;call&quot;: &quot;calculate&quot;,
+      &quot;input&quot;: {
+        &quot;expression&quot;: &quot;{{bind.expr}}&quot;
+      }
+    }
+  ],
+  &quot;i18n&quot;: {
+    &quot;ru&quot;: {},
+    &quot;en&quot;: {}
+  }
+}</pre>
+</section>
+<nav aria-label="Workflow pages"><a href="memory.html">Previous: Память</a> · <a href="../index.html#catalogue">Catalogue</a> · <a href="google.html">Next: Google Календарь</a></nav>
+</main></body></html>

@@ -118,8 +118,12 @@ scripts from `venv/`.
 
 ```bash
 uv venv --python 3.12 venv
-uv pip install -r pyproject.toml --python venv/bin/python
+uv pip sync --require-hashes --python venv/bin/python requirements.lock
+uv pip check --python venv/bin/python
 ```
+
+See [Python dependency locks](docs/reference/python-dependencies.md) for lock updates
+and the patched ntgcalls procedure used by voice calls.
 
 ### MTProto Service Tier (optional)
 

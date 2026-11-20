@@ -579,8 +579,9 @@ All scripts read `MTPROTO_API_ID` / `MTPROTO_API_HASH` from the environment and 
 
 ## Python / uv
 
-Python deps in `pyproject.toml`. Use `uv` — never `pip` directly.
-Commands: `uv pip install -r pyproject.toml --python venv/bin/python`, `uv venv --python 3.12 venv`.
+Python dependencies are declared in `pyproject.toml` and locked universally in `requirements.lock`. Use `uv` — never `pip` directly.
+Create the host environment with `uv venv --python 3.12 venv`, then install with `uv pip sync --require-hashes --python venv/bin/python requirements.lock`.
+Use the uv pip compile/sync workflow documented in `docs/reference/python-dependencies.md`; the native `python-lock` CI check verifies declaration/lock consistency.
 
 Voice calls (service tier only) need ntgcalls built from source with a patch — see `docs/reference/deploy-runbook.md`.
 

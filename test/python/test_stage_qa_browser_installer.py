@@ -150,6 +150,12 @@ class InstallerCase(unittest.TestCase):
         self.home.mkdir()
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
+        git = shutil.which("git")
+        if git is None:
+            raise RuntimeError("Git is required for installer regression tests")
+        self.git_executable = Path(git).resolve()
+        # The restricted fixture PATH must retain the real installer Git guards.
+        (self.bin / "git").symlink_to(self.git_executable)
         for name, text in (
             ("npm", FAKE_NPM),
             ("uv", FAKE_UV),
@@ -207,7 +213,7 @@ class InstallerCase(unittest.TestCase):
         # core.hooksPath: a machine-wide commit gate must not decide whether this throw-away repo can commit.
         subprocess.run(
             [
-                "git",
+                str(self.git_executable),
                 "-C",
                 str(self.src),
                 "-c",
