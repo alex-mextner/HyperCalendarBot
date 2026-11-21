@@ -1,4 +1,6 @@
 import { Blob as BufferBlob } from 'node:buffer';
+import { TelegramError } from 'gramio';
+import { imageLogger } from './logger.ts';
 // Shared lossless PNG delivery policy for command, callback, and AI render transports.
 /** `tooLarge`: the picture is over a limit the user can stay under by asking for less; any other typed error is a defect of the renderer or the transport. */
 export class AgendaImageError extends Error {
@@ -26,14 +28,57 @@ export function agendaImageTooLarge(error: unknown): boolean {
   return error instanceof Error && error.message === AGENDA_ALLOCATION_ERROR;
 }
 
-export async function sendAgendaImage<T>(
+/**
+ * Telegram refuses a photo it cannot process (`IMAGE_PROCESS_FAILED`, `PHOTO_INVALID_DIMENSIONS`) even when the
+ * local limits pass. Only Telegram's own 400 qualifies: it means nothing was sent, so the same PNG as a document
+ * is not a replay. Any other error leaves the photo's outcome unknown and propagates. Known limit (#1025): the
+ * caller's send bound (`IMAGE_SEND_BOUND_MS`) races this whole call without cancelling it, so a photo that is
+ * refused only after the bound fired still starts the document, and both uploads share that one limit.
+ */
+function photoRejectedByTelegram(error: unknown): error is TelegramError<'sendPhoto'> {
+  return (
+    error instanceof TelegramError &&
+    error.code === 400 &&
+    /\b(IMAGE_PROCESS_FAILED|PHOTO_INVALID_DIMENSIONS)\b/.test(error.message)
+  );
+}
+
+function documentCaption(language: string | undefined, reason: 'oversized' | 'photoRefused'): string {
+  if (reason === 'photoRefused')
+    return language === 'ru'
+      ? 'Telegram не смог обработать это расписание как фото. Полная картинка отправлена PNG-файлом без обрезки данных.'
+      : 'Telegram could not process this agenda as a photo. The complete PNG is attached as a lossless document.';
+  return language === 'ru'
+    ? 'Это расписание превышает ограничения для фото. Полная картинка отправлена PNG-файлом без обрезки данных.'
+    : 'This agenda exceeds Telegram photo limits. The complete PNG is attached as a lossless document.';
+}
+
+type AgendaTransport<T> = {
+  language?: string;
+  sendPhoto?: (file: File) => Promise<T>;
+  sendDocument?: (file: File, options: { caption: string }) => Promise<T>;
+};
+
+async function sendPhotoOrRefusedDocument<T>(
   file: File,
-  transport: {
-    language?: string;
-    sendPhoto?: (file: File) => Promise<T>;
-    sendDocument?: (file: File, options: { caption: string }) => Promise<T>;
-  },
+  size: { width: number; height: number },
+  transport: AgendaTransport<T>,
 ): Promise<T> {
+  if (!transport.sendPhoto) throw new AgendaImageError('Photo delivery is unavailable.');
+  try {
+    return await transport.sendPhoto(file);
+  } catch (error) {
+    if (!transport.sendDocument || !photoRejectedByTelegram(error)) throw error;
+    // The 400 never reaches ImageDelivery's failure log or alert, so the refusal is recorded here.
+    imageLogger.warn(
+      { code: error.code, description: error.message, ...size, bytes: file.size },
+      'Photo refused by Telegram, sending as document',
+    );
+    return transport.sendDocument(file, { caption: documentCaption(transport.language, 'photoRefused') });
+  }
+}
+
+export async function sendAgendaImage<T>(file: File, transport: AgendaTransport<T>): Promise<T> {
   if (file.size > 50 * 1024 * 1024)
     throw new AgendaImageError('Agenda PNG exceeds the 50 MB document limit. Choose a shorter date range.', true);
   const header = Buffer.from(await BufferBlob.prototype.slice.call(file, 0, 24).arrayBuffer());
@@ -51,17 +96,11 @@ export async function sendAgendaImage<T>(
     Math.max(width, height) / Math.min(width, height) <= 20 &&
     file.size <= 10 * 1024 * 1024
   ) {
-    if (!transport.sendPhoto) throw new AgendaImageError('Photo delivery is unavailable.');
-    return transport.sendPhoto(file);
+    return sendPhotoOrRefusedDocument(file, { width, height }, transport);
   }
   if (!transport.sendDocument)
     throw new AgendaImageError('Agenda requires PNG document delivery, but document delivery is unavailable.');
-  return transport.sendDocument(file, {
-    caption:
-      transport.language === 'ru'
-        ? 'Это расписание превышает ограничения для фото. Полная картинка отправлена PNG-файлом без обрезки данных.'
-        : 'This agenda exceeds Telegram photo limits. The complete PNG is attached as a lossless document.',
-  });
+  return transport.sendDocument(file, { caption: documentCaption(transport.language, 'oversized') });
 }
 
 /** Plan screenshot allocation before creating a raster. */
