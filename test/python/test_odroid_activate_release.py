@@ -250,8 +250,17 @@ class ActivateReleaseTests(unittest.TestCase):
         self.wrapper.chmod(0o755)
 
     def recorder(self, exit_code=0):
-        return (
+        protocol = (ROOT / "scripts/deploy-prebuilt-image.sh").read_text().split(
+            "# BEGIN ACTIVATION_RECOVERY\n", 1
+        )[1].split("# END ACTIVATION_RECOVERY", 1)[0]
+        header = (
             "#!/bin/bash\n"
+            'if [[ "$#" == 1 && "$1" == --activation-control-version ]]; then\n'
+            "  printf 'native-activation-control-v3\\n'; exit 0\nfi\n"
+            'DEPLOY_PATH="$1"; REMOTE_SRC="$2"; IMAGE="$3"; SHA="$4"\n'
+            'ARCHIVE_SUM="$5"; CONFIG_ID="$6"\n'
+        )
+        return header + protocol + (
             f"python3 - \"$@\" > {self.record}/run.json <<'PY'\n"
             "import json, os, stat, sys\n"
             "stage = sys.argv[2]\n"
@@ -260,9 +269,10 @@ class ActivateReleaseTests(unittest.TestCase):
             "    for name in dirs + names:\n"
             "        path = os.path.join(top, name)\n"
             "        files[os.path.relpath(path, stage)] = stat.S_IMODE(os.lstat(path).st_mode)\n"
-            "print(json.dumps({'args': sys.argv[1:], 'stage_mode': stat.S_IMODE(os.lstat(stage).st_mode),\n"
+            "print(json.dumps({'args': sys.argv[1:7], 'stage_mode': stat.S_IMODE(os.lstat(stage).st_mode),\n"
             "                  'files': files, 'env': sorted(os.environ)}))\n"
             "PY\n"
+            f"activation_outcome={'verified' if exit_code == 0 else 'preflight_failed'}\n"
             f"exit {exit_code}\n"
         )
 

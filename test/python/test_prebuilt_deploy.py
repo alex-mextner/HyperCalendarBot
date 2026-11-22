@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -264,6 +265,21 @@ print(body,end='')
             ODROID_DEPLOY_LOCK_FILE=str(self.path / "odroid-deploy.lock"),
         )
         env.update(changes)
+        # This harness is the supervisor: a fresh private request binds the real
+        # child to this process, and cleanup remains our responsibility.
+        self.control = Path(tempfile.mkdtemp(prefix=f".activation-{SHA}-", dir=self.dep))
+        request = {
+            "version": 3, "sha": SHA,
+            "stage": str((self.src if staging_path is None else staging_path).resolve()),
+            "nonce": "1" * 32, "supervisor_pid": os.getpid(),
+            "forward_deadline": time.monotonic() + 2700,
+            "minimum_activation_seconds": 1500,
+            "recovery_grace_seconds": 1500,
+        }
+        for name, content in (("request.json", json.dumps(request)), ("lock", "")):
+            target = self.control / name
+            target.write_text(content)
+            target.chmod(0o600)
         return subprocess.run(
             [
                 "bash",
@@ -274,6 +290,7 @@ print(body,end='')
                 SHA,
                 self.digest,
                 self.config_id,
+                str(self.control),
             ],
             cwd=self.dep,
             env=env,
@@ -334,8 +351,8 @@ print(body,end='')
         self.assertFalse(self.log.exists())
 
     def test_pre_784_fallback_tmp_staging_namespace_is_still_accepted(self):
-        # deploy-local-fallback.sh now stages under the deploy path (covered by
-        # test_local_fallback_staging.py); the activator still owns the old /tmp names.
+        # The local fallback now refuses before work. This fixture supplies the private
+        # control protocol while checking the retained legacy /tmp staging namespace.
         stage = Path("/tmp") / ("hypercal-source-" + SHA[:12] + "-" + str(os.getpid()))
         stage.mkdir(exist_ok=False)
         self.addCleanup(shutil.rmtree, stage, True)
@@ -343,7 +360,8 @@ print(body,end='')
         result = self.run_deploy(staging_path=stage)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.rows(), ["before", "after-start"])
-        self.assertFalse(stage.exists())
+        self.assertTrue(stage.exists(), "supervised child must leave cleanup to its controller")
+        self.assertEqual(json.loads((self.control / "state.json").read_text())["outcome"], "verified")
 
     def test_success_pins_verified_config_and_writes_receipt(self):
         result = self.run_deploy()
@@ -753,9 +771,11 @@ print(body,end='')
 
     def test_failed_alias_update_does_not_undo_a_verified_release(self):
         result = self.run_deploy(TAG_FAILURE="1")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("IMAGE_ALIAS update failed", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), self.config_id)
         self.assertTrue((self.dep / "releases/current.json").exists())
+        self.assertEqual(json.loads((self.control / "state.json").read_text())["outcome"], "verified")
         self.assertNotIn("ROLLBACK", result.stderr)
 
     def test_receipt_failure_does_not_restore_old_image_after_verification(self):
@@ -963,6 +983,12 @@ print(body,end='')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("level>=50", result.stderr)
         self.assertEqual((self.dep / "current").read_text(), "sha256:old")
+        # The old image alone is not a healthy rollback proof. Its full health
+        # verdict still reports this dependency outage and retains the hold.
+        self.assertIn("verdict=unhealthy", result.stderr)
+        self.assertEqual(json.loads((self.control / "state.json").read_text())["outcome"],
+                         "recovery_required")
+        self.assertTrue(self.src.exists())
 
     def test_deploy_takes_the_shared_host_lock_for_this_repository(self):
         result = self.run_deploy()
@@ -974,31 +1000,8 @@ print(body,end='')
         broken = self.path / "broken-scripts"
         shutil.copytree(ROOT / "scripts", broken)
         (broken / "deploy-health.py").unlink()
-        result = subprocess.run(
-            [
-                "bash",
-                str(broken / "deploy-prebuilt-image.sh"),
-                str(self.dep),
-                str(self.src),
-                "repo/image",
-                SHA,
-                self.digest,
-                self.config_id,
-            ],
-            cwd=self.dep,
-            text=True,
-            capture_output=True,
-            timeout=15,
-            env=dict(
-                os.environ,
-                PATH=str(self.bin) + ":" + os.environ["PATH"],
-                FIXTURE_DEP=str(self.dep),
-                FIXTURE_LOG=str(self.log),
-                FIXTURE_ID=self.config_id,
-                FIXTURE_SHA=SHA,
-            ),
-            check=False,
-        )
+        self.remote = broken / "deploy-prebuilt-image.sh"
+        result = self.run_deploy()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing scripts/deploy-health.py", result.stderr)
         self.assertFalse(self.log.exists())

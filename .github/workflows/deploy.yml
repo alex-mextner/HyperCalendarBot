@@ -136,8 +136,8 @@ jobs:
     # main reach it; no pull_request-triggered workflow may ever target this label.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, bananapi-hcb]
-    # A deploy may first WAIT up to 40 min for the other repository's deploy (host deploy lock, runbook
-    # "Deploy reliability"), then load and swap: the job limit has to outlast both.
+    # The native wrapper includes artifact/lock/load time in 2700 s and reserves 1500 s
+    # before a runtime swap; recovery has a separate bounded 1500 s grace (runbook).
     timeout-minutes: 100
     permissions:
       actions: read
