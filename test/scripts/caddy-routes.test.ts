@@ -200,7 +200,7 @@ describe('Caddy routing', () => {
   // a retired name (#828). The activator's own host is owned by the deploy-reliability work.
   test('the deploy verifies the path the watchdog polls, and the watchdog host comes from PUBLIC_DOMAIN', () => {
     expect(deployWorkflow).toContain('sudo -n /usr/local/sbin/hypercal-activate-release');
-    expect(activationWrapper).toContain('bash "$STAGE/scripts/deploy-prebuilt-image.sh"');
+    expect(activationWrapper).toContain('"bash", str(Path(STAGE) / "scripts/deploy-prebuilt-image.sh")');
     // The activator delegates the verdict to scripts/deploy-health.py, which polls /health and /ready
     // on the container's own port (the public host is not what the release controls).
     expect(deployActivator).toContain('deploy-health.py');

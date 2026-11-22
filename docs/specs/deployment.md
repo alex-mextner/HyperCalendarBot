@@ -135,8 +135,11 @@ On every push to `main` (`.github/workflows/deploy.yml`):
 
 ## Manual Deploy
 
-`scripts/deploy-local-fallback.sh` builds the exact `origin/main` commit locally as linux/arm64 and runs
-the same activator on `root@bananapi-m4`; see the deploy runbook, "Local deploy fallback".
+The native deadline/recovery protocol requires the root-installed supervisor and
+its trusted control request. The legacy six-argument local fallback is refused
+before runtime mutation; it cannot substitute for a failed hosted deployment.
+Use the accepted-source installation and ordinary workflow rerun sequence in the
+deploy runbook, "Native activation deadline and recovery (#1031)".
 
 ## Monitoring
 

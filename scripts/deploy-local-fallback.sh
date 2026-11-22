@@ -18,8 +18,12 @@ usage() {
   cat <<'EOF'
 Usage: scripts/deploy-local-fallback.sh [--ref <git-ref>] [--skip-tests]
 
-Defaults to origin/main and runs the local test/lint/typecheck gate first.
-Use --skip-tests only when the exact commit already passed the same local gate.
+Activation is unavailable: this legacy caller has no native-activation-control-v3
+supervisor. Normal invocation refuses before checkout, verification, build or
+transport, including when --skip-tests is supplied. Use the accepted hosted
+release and installed native supervisor; do not fabricate a control request.
+
+The builder configuration below describes the retained legacy implementation.
 
 Local linux/arm64 image builder (HYPERCAL_BUILD_BACKEND, default auto):
   container  Apple's native `container` CLI (macOS, no always-on Linux VM).
@@ -56,6 +60,11 @@ while (($#)); do
       ;;
   esac
 done
+# This caller cannot produce the private root supervisor/control handshake.
+# Refuse before its legacy verification, build or transport can consume resources.
+printf '%s\n' 'Native activation supervisor/control required: this local fallback has no native-activation-control-v3; no verification, build, upload or activation started.' >&2
+exit 2
+
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 

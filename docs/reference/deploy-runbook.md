@@ -268,34 +268,38 @@ Rollback (the odroid's `/opt/hypercal` and redis volume stay untouched until the
 2. Re-add the rule `hypercal.mextner.com` -> `http://localhost:3001` to the tunnel `odroid-home` (it was removed from that tunnel) and point the CNAME back to it.
 3. Anything written on the Banana in the meantime (calendar database, redis state, logs) has to be copied back to the odroid before it starts.
 4. On the odroid `docker start hypercal-redis hypercal-bot`, then verify `/health` and `/ready`.
-5. Deploys: revert this repository's move commit (label `bananapi-hcb` -> `odroid-hcb`, default `HYPERCAL_DEPLOY_HOST` -> `root@odroidn2`) and start the odroid runners again; until then set `HYPERCAL_DEPLOY_HOST=root@odroidn2` for `gh ship` and the local fallback, and expect hosted deploys to stay queued.
+5. Deploys: reverting this repository's move commit restores the old runner label and host selection. After #1031, install the accepted protocol-v3 outer helper on the selected host under the deployment locks before an ordinary hosted deployment or rerun. The local fallback remains refused; changing `HYPERCAL_DEPLOY_HOST` cannot supply its missing private control protocol. Preserve the currently working runtime until that accepted transition is ready.
 
 ## Normal ship deployment
 
-`gh ship <PR>` first delegates to the shared review, acceptance, merge and local-CI gates. The post-merge step loads its own code from the exact merged Git commit, so removing a PR worktree cannot remove the deployment runner. It reuses the local prebuilt-image fallback and repeats its exact-source tests; no `--skip-tests` is passed automatically.
+`gh ship <PR>` first delegates to the shared review, acceptance, merge and CI gates. The post-merge step loads its own code from the exact merged Git commit, so removing a PR worktree cannot remove the deployment runner. After #1031 its legacy local-fallback branch refuses before verification, build or upload because that caller cannot supply the native control protocol. Preserve that failure and use the accepted native helper installation and ordinary hosted rerun sequence below; no checks are skipped to make it succeed.
 
-The post-merge runner uses a nonblocking local release lock, then compares the production receipt, actual running image/revision, health and readiness. An already verified target is a no-op. A newer main is reported as superseded. An active hosted deployment remains its owner; an actual executed failing hosted step is not bypassed. A failed platform run with zero executable steps/runner or a bounded absence of a run may use the local gate. API errors are not treated as proof CI is down.
+The post-merge runner uses a nonblocking local release lock, then compares the production receipt, actual running image/revision, health and readiness. An already verified target is a no-op. A newer main is reported as superseded. An active hosted deployment remains its owner; an actual executed failing hosted step is not bypassed. A failed platform run with zero executable steps/runner or a bounded absence of a run may select the historical local branch, but that caller now refuses with exit 2 before verification, build or upload. Use the accepted helper installation and ordinary hosted rerun sequence; API errors are not treated as proof CI is down.
 
-Since 2026-11-20 the `deploy` job runs on the Banana's self-hosted runner `bananapi-hcb` (from 2026-10-09 to then on the odroid's). While that runner is offline the job stays queued and the run is `in_progress`, so post-ship reports `hosted_pending` (exit 75) and the queued job deploys when the runner returns. A run that was cancelled, or whose build ran, is never treated as runner unavailability; deploy such a commit with `scripts/deploy-local-fallback.sh` directly.
+Since 2026-11-20 the `deploy` job runs on the Banana's self-hosted runner `bananapi-hcb` (from 2026-10-09 to then on the odroid's). While that runner is offline the job stays queued and the run is `in_progress`, so post-ship reports `hosted_pending` (exit 75) and the queued job deploys when the runner returns. A run that was cancelled, or whose build ran, is never treated as runner unavailability. After #1031 the legacy local caller is also refused before mutation; preserve the actual failure and use the native protocol installation/rerun sequence below.
 
-Set the existing `HYPERCAL_BUN_BIN` operator variable before shipping when the default `bun` differs from the pinned local toolchain. `HYPERCAL_DOCKER_BIN`/`HYPERCAL_DOCKER_CONTEXT` are only for building with a real Docker Engine instead of Apple `container`: setting `HYPERCAL_DOCKER_CONTEXT` alone switches the builder to Docker, so do not leave a stale value (e.g. `colima`) exported — the post-merge runner inherits the environment. Status is recorded under the common Git directory as `post-ship-release.json`. `hosted_pending`, `busy` and `superseded` return exit 75, not a false deployment success. `ok (unverified)` remains runtime-only verification.
+The historical `HYPERCAL_BUN_BIN`, `HYPERCAL_DOCKER_BIN` and `HYPERCAL_DOCKER_CONTEXT` settings belong to the retained local builder. None makes that refused caller operational under the native protocol. Status is recorded under the common Git directory as `post-ship-release.json`. `hosted_pending`, `busy` and `superseded` return exit 75, not a false deployment success. `ok (unverified)` remains runtime-only verification.
 
 ## Local deploy fallback
 
-Use only when the hosted pipeline cannot deploy (no GitHub runner, or the Banana runner `bananapi-hcb` is down) and the exact commit has been locally verified. The fallback builds Linux arm64 locally from a clean `git archive` and deploys to `root@bananapi-m4` (override with `HYPERCAL_DEPLOY_HOST`). The production host only loads a checksum-verified image; it never compiles source or runs the test suite. It stages the source and the image archive in a `0700` directory `/opt/hypercal/.incoming-<sha>-<time>-<pid>`, the same namespace as hosted deploys, and removes it on exit. Not `/tmp`: on the Banana that is a tmpfs in its 1.7 GB of RAM.
+After #1031, this legacy six-argument caller returns exit 2 before verification, build or upload. The inner activator also refuses any standalone call without its private native control. It is not the native deadline/recovery route and must not be used to bypass a failed hosted attempt. A future reviewed caller update is required before this fallback can activate a new release. The following describes the retained historical builder/transport; it is not a working alternative for the protocol transition.
+
+Historically, this was used when the hosted pipeline could not deploy and the exact commit was locally verified. The legacy fallback builds Linux arm64 locally from a clean `git archive` and deploys to `root@bananapi-m4` (override with `HYPERCAL_DEPLOY_HOST`). The production host only loads a checksum-verified image; it never compiles source or runs the test suite. It stages the source and the image archive in a `0700` directory `/opt/hypercal/.incoming-<sha>-<time>-<pid>`, the same namespace as hosted deploys, and removes it on exit. Not `/tmp`: on the Banana that is a tmpfs in its 1.7 GB of RAM.
 
 Local builder: on the dev Mac it is Apple's native `container` CLI (Homebrew `container`; run `container system start` if `container system status` reports it stopped), with no always-on Linux VM; on Apple Silicon the arm64 build is native. `container build --platform linux/arm64` builds the image, `container image save` exports an OCI image layout, and `scripts/oci-to-docker-archive.py --platform linux/arm64` converts that — verifying the digest of every blob it reads and keeping the config bytes, so the config digest is unchanged — into the `docker save` format that `scripts/release-artifact.py` and the server's `docker load` identity checks expect, including the OCI layout (`oci-layout`, `index.json` and an image manifest for the uncompressed layers) whose manifest digest becomes the image ID on production's containerd image store (see Docker, "Image identity"). The local image is deleted after export. **Colima was removed from the Mac on 2026-09-26 (its VM disk kept growing) and is no longer a supported builder: do not reinstall it, Docker Desktop, OrbStack or another Docker VM for this.** A real Docker Engine elsewhere is still accepted via `HYPERCAL_BUILD_BACKEND=docker` (local Unix-socket context `HYPERCAL_DOCKER_CONTEXT`, default `default`, and CLI `HYPERCAL_DOCKER_BIN`); on an x86_64 Linux host it builds `--platform linux/arm64` only with binfmt_misc/QEMU arm64 emulation registered (for example `docker run --privileged --rm tonistiigi/binfmt --install arm64`), and much slower than native.
 
-```bash
-# Default: fetch and deploy the exact commit at origin/main, with local tests first.
-# The system Bun must be the pinned 1.4.2; otherwise point HYPERCAL_BUN_BIN at one.
-scripts/deploy-local-fallback.sh
-
-# If that exact commit already passed the full local gate in this incident/session:
-scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
-```
-
-The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity (see Docker, "Image identity"). An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes, and the rollback counts only when the restored container is the previous image answering `/health=ok` (readiness is logged, not required: an AI provider outage fails it for every image); otherwise the log says `ROLLBACK FAILED` and the bot may be down. Before any backup or restart, the schema gate below decides whether the release's migrations may activate unattended. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`: `revision`, `config_digest`, `image_id` (the container's `.Image` the activator verified), `archive_sha256`, `ready`, `rollback_image`, `verified_at`. Normal gh-ship invokes this same fallback after its merge and hosted-run checks; manual use remains an operator recovery path. End-to-end AI verification remains tracked under #276.
+The legacy command now refuses before it can prepare or transfer an image; its
+six-argument activation call is independently refused before the service lock or
+runtime mutation. Normal gh-ship's older fallback branch fails at the early boundary; that failure
+must remain visible and is not deployment success. It is not a supported manual
+recovery route until a separately reviewed supervisor-aware caller exists.
+The native hosted route retains the existing schema gate, database preservation,
+exact image/health verdict and release receipt described below. Its clean child
+environment does not forward `HYPERCAL_REVIEWED_SCHEMA_TRANSITION`; the historical
+migration-gate diagnostic is not an override supported by this caller. A refused
+transition needs a separately reviewed native caller contract. Do not fabricate
+control files or invoke the inner helper directly to supply that variable.
+End-to-end AI verification remains tracked under #276.
 
 ### Disk space
 
@@ -307,7 +311,7 @@ When the check refuses a release: save `df -h /`, `docker system df` and the ima
 
 ### Schema gate
 
-`scripts/migration-gate.py check`, run by `deploy-prebuilt-image.sh` for hosted CI, the local fallback and gh-ship alike, compares `src/database/migrations.ts` of the running container with the release image (#589). When the file is byte-identical the release goes ahead. Otherwise it activates automatically only when every difference is a new migration entry appended after the shipped ones, which the database's `migrations` table (read through the running container) does not record yet, and whose `docs/reference/migrations/<name>.md` in the release image begins with exactly this front matter and has a non-empty body:
+`scripts/migration-gate.py check`, run by the native `deploy-prebuilt-image.sh` activation for hosted CI, compares `src/database/migrations.ts` of the running container with the release image (#589). When the file is byte-identical the release goes ahead. Otherwise it activates automatically only when every difference is a new migration entry appended after the shipped ones, which the database's `migrations` table (read through the running container) does not record yet, and whose `docs/reference/migrations/<name>.md` in the release image begins with exactly this front matter and has a non-empty body:
 
 ```markdown
 ---
@@ -324,12 +328,9 @@ data-deletion: no
 
 A release that declares `rollback-compatible: no` or `data-deletion: yes`, changes code outside the entries, or ships a migration that the database records but the running image lacks (after an image-only rollback) needs a written, reviewed migration procedure, as for 062 and 063. The operator runs the activation by hand on the host and names the one transition that was reviewed. The refusal prints the pair, but it is the reviewed procedure that authorizes it:
 
-```bash
-HYPERCAL_REVIEWED_SCHEMA_TRANSITION="<running sha256>:<release sha256>" \
-  bash "$STAGE/scripts/deploy-prebuilt-image.sh" /opt/hypercal "$STAGE" "$IMAGE" "$SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
-```
+After #1031 the old standalone six-argument invocation is refused. A reviewed schema transition needs a separately reviewed supervisor-aware procedure; do not fabricate a control request to revive the old call. The ordinary hosted wrapper never forwards this override.
 
-The two values are `sha256sum /app/src/database/migrations.ts` in the running container and in the release image. Hosted CI, the local fallback and gh-ship never set the variable. It never accepts a missing, empty or malformed doc; an edited, renamed, removed or reordered shipped migration (the runner would never run the edit); a `migrations.ts` that cannot be read or parsed; exports that differ from the source entries; or applied migrations or docs that cannot be read.
+The two values are `sha256sum /app/src/database/migrations.ts` in the running container and in the release image. Hosted CI never forwards the variable. The legacy local fallback and the corresponding gh-ship fallback refuse before reaching this gate. It never accepts a missing, empty or malformed doc; an edited, renamed, removed or reordered shipped migration (the runner would never run the edit); a `migrations.ts` that cannot be read or parsed; exports that differ from the source entries; or applied migrations or docs that cannot be read.
 
 Every activation logs one audit line before the backup. Its keys are fixed:
 
@@ -353,7 +354,7 @@ Production's Docker (29 on the Banana; 29.9.0 on the odroid before it) uses the 
 
 A release archive is a `docker save` tar carrying both names: `manifest.json` points at the config blob, and the OCI layout (`oci-layout`, `index.json`) names one image manifest for the release tag (annotation `io.containerd.image.name`) whose `config` is that blob. `scripts/release-artifact.py` reads both from the archive, checks each blob against its digest and the manifest against the config, and reports `config_digest` and `manifest_digest`. The config digest stays the release identity: the activator's `CONFIG_ID` argument, `artifact.json` and the receipt's `config_digest`. `deploy-prebuilt-image.sh` reads the daemon's DriverStatus once and compares the loaded image's `.Id`, and the recreated container's `.Image`, with the one digest that store uses: `manifest_digest` on containerd, `config_digest` on the classic store. Anything else stops the deploy, before the backup for a bad load and with a rollback for a wrong container. The rollback check compares the restored container with the previous container's `.Image`, both read from the same daemon. The receipt records that `.Image` as `image_id`, which `scripts/post-ship-deploy.py` compares with the live container.
 
-`release-artifact.py` therefore refuses an archive without that OCI layout, at build time in CI and in the local fallback. `docker save` writes it from Docker Engine 25 on, so a `HYPERCAL_BUILD_BACKEND=docker` builder needs Docker 25 or newer; `oci-to-docker-archive.py` writes it for the Apple `container` path. From a layout-less archive the containerd store would make up a manifest whose digest appears nowhere in the archive, so the deploy could not verify the loaded image.
+`release-artifact.py` therefore refuses an archive without that OCI layout at build time in CI. The retained historical local builder has the same validation, but its entry point now refuses before building. `docker save` writes it from Docker Engine 25 on, so a `HYPERCAL_BUILD_BACKEND=docker` builder needs Docker 25 or newer; `oci-to-docker-archive.py` writes it for the Apple `container` path. From a layout-less archive the containerd store would make up a manifest whose digest appears nowhere in the archive, so the deploy could not verify the loaded image.
 
 The first odroid release, run 38018033717 on 2026-10-10 at about 03:07 UTC (`11bb45f7`), failed this way before the comparison was store-aware: `docker load` succeeded, then the activator stopped with `Loaded config identity mismatch` without touching the running container. Its archive's config digest is `sha256:37e13787…`, and its indexed manifest `sha256:f0828776…` (2234 bytes, `application/vnd.oci.image.manifest.v1+json`) is exactly the `.Id` the odroid reported for the loaded image.
 
@@ -361,24 +362,161 @@ The first odroid release, run 38018033717 on 2026-10-10 at about 03:07 UTC (`11b
 
 One incident, 2026-10-24 (`evidence` in `~/.local/state/hcb-incidents/2026-10-24-deploy-818/evidence.md`): an HCB deploy overlapped an ESB deploy on the odroid, `/health` took longer than the old fixed 163 s poll, the activator rolled a healthy release back and the rollback destroyed the failed container's logs. The activator now does the following, all inside `scripts/deploy-prebuilt-image.sh` and its helpers (they ship in the release artifact, so a normal deploy updates them):
 
-**Host deploy lock.** `scripts/odroid-deploy-lock.sh` (historic name; the same protocol is in ExpenseSyncBot, which deploys on the same Banana) takes an advisory `flock` on `/run/lock/odroid-deploy.lock` before `docker load` and holds it through the container swap and verification. A second deploy, from either repository, WAITS (it logs `deploy-lock: ... held by: <repo> pid=... since=...` every 30 s) for up to `ODROID_DEPLOY_LOCK_MAX_WAIT` seconds (2400), then exits 75 so the job can simply be re-run. The kernel drops the lock when the holder dies, so a crashed deploy cannot wedge the host; `<lock>.owner` (repo, pid, process start ticks, start time) is informational and judged stale by pid + start ticks. On the Banana the machines repo creates both files at boot (systemd-tmpfiles) as root, group `www-data`, mode 0660, so `www-data` (ESB) and root (HCB) can open them and no other user (a CI job of another bot) can hold the lock or write the owner file; the script itself creates them mode 0666 only on a host where they are missing. Manual check on the Banana: `flock -n /run/lock/odroid-deploy.lock true && echo free || cat /run/lock/odroid-deploy.lock.owner`.
+**Host deploy lock.** `scripts/odroid-deploy-lock.sh` (historic name; the same protocol is in ExpenseSyncBot, which deploys on the same Banana) takes an advisory `flock` on `/run/lock/odroid-deploy.lock` before `docker load` and holds it through the container swap and verification. A second deploy, from either repository, WAITS (it logs `deploy-lock: ... held by: <repo> pid=... since=...` every 30 s) for up to `ODROID_DEPLOY_LOCK_MAX_WAIT` seconds (shared default 2400), then exits 75 so the job can simply be re-run. The kernel drops the lock when the holder dies, so a crashed deploy cannot wedge the host; `<lock>.owner` (repo, pid, process start ticks, start time) is informational and judged stale by pid + start ticks. On the Banana the machines repo creates both files at boot (systemd-tmpfiles) as root, group `www-data`, mode 0660, so `www-data` (ESB) and root (HCB) can open them and no other user (a CI job of another bot) can hold the lock or write the owner file; the script itself creates them mode 0666 only on a host where they are missing. Manual check on the Banana: `flock -n /run/lock/odroid-deploy.lock true && echo free || cat /run/lock/odroid-deploy.lock.owner`. For Calendar's native route, #1031 caps this wait at the absolute forward deadline minus its 1500-second activation reserve, rounds the allowance down to whole lock slices, and refuses an insufficient budget before waiting. Artifact preparation and image loading are charged to the same deadline; the shared lock helper and ExpenseSyncBot's own budget are unchanged. A legacy stage QA run can hold this lock for up to 2400 seconds, which may exceed Calendar's remaining forward allowance after reserving 1500 seconds for activation. That run refuses with exit 75 before a runtime swap; an ordinary rerun after the current owner releases the lock is required. The wrapper neither extends the deadline nor replays a release automatically.
 
 **Health verdict.** `scripts/deploy-health.py` replaces the 15-poll timer. The release is accepted when the container is running, not restarting, not OOM-killed and its restart count is not climbing; `/health` is `ok`; `/ready` is `ok` or `ok (unverified)` (not required when it was already worse before this deploy, because an AI outage fails it for every image); and this holds for `HYPERCAL_HEALTH_STABLE` seconds (15). The window then also fails on a fatal log line (level >= 60) or more than 5 lines of level >= 50 since start; fewer are reported. A container that exited, was OOM-killed or restarted twice is `dead` at once, with no waiting. Otherwise the budget is `HYPERCAL_HEALTH_BASE_BUDGET` = 240 s, and it is extended only while the host is saturated (`/proc/pressure/io` some avg10 >= 20, or 1-minute load > 1.5 x cores) AND the container made progress (a new log line, or a changed probe answer) within `HYPERCAL_HEALTH_STALL` = 120 s, never past `HYPERCAL_HEALTH_HARD_CAP` = 900 s. A slow start under load is therefore not a failure; an alive-but-silent container, or one that is still not healthy at the cap, is `unhealthy` and rolled back as before. The verdict probes the container's own published port `http://127.0.0.1:3001` (the public ingress answers 502 instantly during a restart and is not what the release controls); `PUBLIC_DOMAIN` from `/opt/hypercal/.env` (last assignment wins, inline `# comment`, quotes and CR dropped) is used for one informational `PUBLIC_PROBE` line after verification. Baseline: measured starts were 45-77 s idle, 92 s for the old image under load.
 
-**Failed-release evidence.** Before a rollback touches anything (before `docker stop`, before the force-recreate) `scripts/deploy-evidence.py failed` saves `/opt/hypercal/logs/failed-<sha12>-<UTC stamp>/` (mode 0700, root only): `container.log.gz` (the complete `docker logs`), `container.tail.redacted.log` (last 400 lines, at most 256 KiB, tokens/keys/passwords and message `text`/`caption`/`prompt`/`content` fields redacted), `inspect.json` (state, restart count, image, health, restart policy; never `Config.Env`), `receipt.json` (the last `releases/current.json`), `host-load.txt` (loadavg, PSI, `free`, `df`, `docker ps`, `vmstat`) and a one-line `state.txt`. The path is printed as `FAILED_EVIDENCE <dir>` in the job log. The same script copies the OUTGOING container's complete log to `/opt/hypercal/logs/release-<revision>-<stamp>/` before every swap, so the logs of every release survive its replacement.
+**Failed-release evidence.** Before a rollback touches anything (before `docker stop`, before the force-recreate) `scripts/deploy-evidence.py failed` saves `/opt/hypercal/logs/failed-<sha12>-<UTC stamp>/` (mode 0700, root only): `container.log.gz` (the complete `docker logs`), `container.tail.redacted.log` (last 400 lines, at most 256 KiB, tokens/keys/passwords and message `text`/`caption`/`prompt`/`content` fields redacted), `inspect.json` (state, restart count, image, health, restart policy; never `Config.Env`), `receipt.json` (the last `releases/current.json`), `host-load.txt` (loadavg, PSI, `free`, `df`, `docker ps`, `vmstat`) and a one-line `state.txt`. When collection finishes, the path is recorded as a complete `FAILED_EVIDENCE <dir>` line in the private activation log. The job receives only its bounded final tail, so retrieve the retained or preserved private log if that earlier line is outside the tail. Collection is best effort and shortened or skipped when the native recovery budget must be reserved for restoration. The same script copies the OUTGOING container's complete log to `/opt/hypercal/logs/release-<revision>-<stamp>/` before every swap, so the logs of every release survive its replacement.
 
 **Log retention (nothing is deleted by a deploy or rollback).** After the commit point `scripts/log-retention.py --root /opt/hypercal/logs --alert` gzips old plain logs and deletes only when a criterion is violated, oldest first: managed bytes > 1024 MB, managed entries > 400, any file > 200 MB after gzip, or free space on the filesystem < 2048 MB / 5 %. It manages only `healthcheck*`/`backup*`/other top-level `*.log[.gz]` files and the `release-*` / `failed-*` directories (never `chats/`), and it never deletes the newest `release-*` (last deploy), the newest `failed-*` (last failure) or anything touched in the last 5 minutes. Exit 2 (criterion still violated with only protected entries left) and any deletion send a Telegram message to `BOT_ADMIN_ID` through `BOT_TOKEN` from `.env` (rate-limited to once per 6 h); free space within 2x of the floor warns early. This is also the disk-space watchdog: an hourly root timer runs it (see below) so it does not depend on a deploy. Docker's own rotation stays `json-file` 50 MB x 5 per service in `docker-compose.yml` (`test/python/test_compose_logging.py`).
 On the Banana the root timer `hcb-log-retention` (hourly at :17, declared in the `bananapi-m4` machine config) runs the installed copy between deploys (the deploy installs `/opt/hypercal/scripts/log-retention.py`) as `/opt/hypercal/scripts/log-retention.py --root /opt/hypercal/logs --env-file /opt/hypercal/.env --alert` (alerts reach Telegram, so the output is not kept; running it by hand prints every action). It replaces the odroid's root cron line `17 * * * *`.
 
 
-**Installing the activator after this change (root, by hand, with an instant rollback).** The wrapper has to know the new release files before the first release that ships them:
-```bash
-ssh root@bananapi-m4 'cp -p /usr/local/sbin/hypercal-activate-release /usr/local/sbin/hypercal-activate-release.bak-$(date +%Y%m%d-%H%M%S)'
-scp scripts/odroid-activate-release.sh root@bananapi-m4:/usr/local/sbin/.hypercal-activate-release.new
-ssh root@bananapi-m4 'chown root:root /usr/local/sbin/.hypercal-activate-release.new && chmod 0755 /usr/local/sbin/.hypercal-activate-release.new && mv /usr/local/sbin/.hypercal-activate-release.new /usr/local/sbin/hypercal-activate-release'
-# Instant rollback: mv the newest .bak-* back over hypercal-activate-release (the wrapper is read per invocation).
-```
-The new wrapper is backward compatible (every new file is optional), so install it BEFORE merging the change that ships those files. Never `docker system prune`; never kill PIDs you do not own; read `docker logs`/`inspect` and the failed-evidence directory before restarting anything.
+### Native activation deadline and recovery (#1031)
+
+The root-installed `hypercal-activate-release` and the release's
+`deploy-prebuilt-image.sh` now use `native-activation-control-v3` together.
+The wrapper has a fixed **2700-second forward budget measured from wrapper start**,
+including artifact verification, lock waits, image loading and activation. It
+starts the inner helper in a separate session with a clean environment, `/` as
+its working directory and closed stdin. Inline Python uses isolated mode so the
+runner's checkout cannot supply imported modules. A deadline or TERM/INT/HUP requests cancellation of only that owned process
+group. Recovery gets at most **1500 seconds**, inside the caller's 4500-second
+transport ceiling; these are fixed Calendar budgets, not environment overrides.
+
+The wrapper creates a fresh root-owned 0700
+`/opt/hypercal/.activation-<sha>-<random>` directory outside the extracted artifact.
+Its 0600 request binds the protocol version, exact SHA, stage path, fresh nonce,
+supervisor PID, absolute monotonic forward deadline, fixed 1500-second recovery
+grace and fixed 1500-second minimum activation reserve; the inner helper also
+binds its own PID. The wrapper checks that reserve before creating control state
+and again immediately before launching the child. Shared-lock
+waiting cannot consume that reserve, and the inner rechecks immediately after
+acquiring the shared lock, before image work, and before switching deployed host
+files. An insufficient reserve returns retry status 75. Loading, backup and probes
+still consume the same absolute deadline; acquiring a lock does not guarantee
+that they or activation will finish. The reserve covers normal bounded steps and
+does not guarantee success under stalled host I/O. The forward compose call has a 120-second timeout and 10-second kill-after. Before runtime changes,
+the wrapper checks the inner protocol and the inner validates its private control
+request. Artifact files and receipts from an older attempt supply no cleanup credit.
+The deployment directory and installed wrapper must remain root-owned, with no
+untrusted writer able to replace their paths.
+
+After installing its recovery traps, the inner publishes a bound `forward` phase.
+The supervisor waits for that proof before its one cooperative TERM; an unarmed
+or stalled startup remains subject to the same hard deadline and unknown hold.
+Before TERM, it publishes a private `cancellation.json` bound to the same request
+and child PID, with its actual earlier recovery deadline. The inner consumes only
+the time remaining until that deadline, so a delayed trap cannot restart the grace.
+If this handoff cannot be written, no TERM is sent and the unchanged hard deadline
+retains the attempt. A short phase lock serializes cancellation with the inner helper's transition
+into recovery. Once recovery has started, repeated
+cancellation does not signal its commands again. The supervisor never waits
+indefinitely on that lock. At grace expiry it attempts to durably record an
+`unknown` outcome in `supervisor.json` before terminating only the owned group.
+If that write fails, the retained control directory still blocks admission; no
+successful recovery is inferred. A failed recovering-phase or log write does not
+skip the actual rollback attempt, and a failed phase proof cannot earn cleanup.
+The terminal writer is protected from cooperative cancellation. An unreapable
+child remains unknown after the bounded forced-exit wait.
+
+Recovery commands share one remaining allowance, capped by the private request's
+absolute forward deadline plus the fixed grace and any earlier bound cancellation
+deadline. Evidence collection leaves 1200
+seconds of that allowance for restoration. Docker stop/start/inspection, the
+schema guard, rollback compose and the complete health process use the smaller
+of their step ceiling and the remaining allowance. Each command leaves 30 seconds
+for kill-after and terminal proof. The health helper keeps its existing options,
+including any shorter configured cap. No new recovery command starts after its
+allowance is exhausted; a missing or incomplete verdict keeps the hold.
+
+Child output goes to the private regular `activation.log` inside that attempt's
+control directory, independent of the SSH reader. Supervisor status and a bounded
+final log tail use nonblocking best-effort writes. After a proven terminal outcome,
+the log is preserved as a 0600 file under root-owned 0700
+`/opt/hypercal/.native-activation-logs/` before stage/control cleanup.
+That directory is outside the bot-owned/mounted `logs/` tree and its ownership
+preparation. This change does not automatically delete those audit logs.
+A preservation failure retains the attempt as a hold. Retained attempts also
+print a bounded tail directly from their private log without moving or deleting
+that evidence. UTC timestamps correlate
+evidence across a reboot; only the current monotonic deadline governs timeouts.
+
+The inner helper never removes the stage. The wrapper removes stage and control
+files only after the child has exited, no live descendant remains in its process
+group, and the matching private terminal record reports one of:
+
+- `preflight_failed`: no runtime or deployed-host-file switch started;
+- `verified`: exact candidate image/revision and the normal runtime verdict passed,
+  and the matching release receipt was published;
+- `rolled_back`: both host-file restoration and the exact previous-image health
+  verdict completed successfully.
+
+After the runtime verdict, a receipt failure keeps the exact running candidate
+and retains the attempt; it does not restore the previous image or claim a
+published receipt. The informational public probe runs only after that receipt.
+The probe, image alias and retention work are bounded and best effort. Their
+failure or cancellation does not undo a committed release: success still requires
+a valid `verified` terminal record with zero child exit and a fully exited group.
+A failed terminal write, unfinished group or failed log preservation keeps the hold.
+
+`recovery_required`, a skipped or failed rollback, a missing/mismatched outcome,
+a remaining child, or an expired recovery grace retains the stage and control.
+`supervisor.json` is the authoritative unresolved hold when present; the inner
+cannot overwrite it with a later state update. The outer refuses any retained
+`.activation-*` before artifact preparation, and the inner rechecks other retained
+attempts while holding the existing per-service lock before any runtime mutation.
+
+Clearing that hold is an explicit root recovery operation. Preserve the private
+request, state, supervisor record and log; verify no attempt or release process
+remains active, then hold both `/opt/hypercal/.release.lock` and
+`/run/lock/odroid-deploy.lock`. Under those locks, establish the intended exact
+running revision/image and complete health verdict, matching host configuration,
+and current database compatibility with that image using the reviewed migration
+procedure. Preserve the resulting recovery evidence with the original journal;
+only then may root archive that specific control directory outside the admission
+namespace. A missing, mismatched or unreadable proof leaves the directory and hold
+in place. The release code neither clears it automatically nor performs another
+restore/replay. Unknown completion never authorizes an older database restore or
+a metadata-only clearance. Ordinary nonzero inner exits remain nonzero; a native
+deadline returns 124 and cancellation normally returns 128 plus its signal.
+
+**Mixed-version rollout is fail-closed.** An old outer calling the new inner with
+six arguments is refused before the service lock, Docker or deployed host files
+are touched. A new outer refuses an old inner that lacks the protocol before
+activation. The existing running bot remains in place in either case. The old
+six-argument local fallback and standalone migration invocation are not upgraded
+by this change and cannot activate the new inner.
+
+**Release order.** Complete exact native review and canonical PR CI first.
+A normal accepted merge triggers the real push-to-main deploy workflow; its first
+attempt may refuse on the old installed outer. Record that as a real failed
+attempt, never as a pass. Once that release has ended, verify there is no active
+release owner and take the per-service `/opt/hypercal/.release.lock` and shared
+`/run/lock/odroid-deploy.lock` while installing the outer atomically from the exact
+accepted commit, retaining its previous bytes for rollback. Verify root ownership,
+0755 mode and the installed SHA256 before releasing the locks. Then use the
+ordinary workflow rerun for the current exact main revision. The wrapper rechecks
+main, run, artifact and digest; a superseded commit is refused.
+
+Only the actual successful rerun plus exact receipt/image and runtime QA proves
+the new contract installed and working. The common Rig production adapter remains
+held, with its existing audited helper pins unchanged, until the accepted source,
+installed helper bytes and real recovery/QA contract are independently verified.
+The protocol name alone is not rollout or admission proof. Keep the existing
+stage workflows and runners active while the replacement is installed and
+verified with separate identities. Retire an old stage route only after real PR
+stage, QA, cleanup and recovery proof for the replacement; this helper change
+does not disable or remove those routes.
+
+**Installing the activator.** Use the accepted-merge, idle/locked atomic install
+and actual rerun order above for every change to the installed wrapper. Stage the
+bytes from the exact accepted commit in a private root-owned location, verify
+their expected SHA256, and preserve the installed file before the atomic rename.
+An unlocked copy from a mutable worktree is not an installation procedure. The
+optional-file compatibility of #823 does not make an old inner compatible with
+the mandatory control protocol. Never use a protocol version alone as recovery
+proof, and preserve retained evidence before any recovery action.
 
 ## Self-hosted runners
 
@@ -386,10 +524,7 @@ Hosted deploys run on a self-hosted runner on the Banana Pi `bananapi-m4` (since
 
 - Runner `bananapi-hcb`, labels `self-hosted, Linux, ARM64, bananapi-hcb`, registered for this repository only and installed at `/var/lib/hcb-runner/actions-runner` as the Unix user `hcb-runner` (not in the docker group, no general sudo). Jobs run under `/var/lib/hcb-runner/actions-runner/_work/`. The runner needs bash and python3; it has no docker access and no `gh` CLI.
 - Only `deploy.yml`'s `deploy` job targets it, and only for pushes to `main`. No workflow triggered by `pull_request` may use a self-hosted label (`test/regressions/hosted-release-contract.test.ts` checks every workflow). The one self-hosted job a pull request can cause is the per-PR stage QA, and it runs on its own runner and label, reached only through a `workflow_run` workflow from `main` that carries a SHA and never code: see "Stage QA". The repository's fork pull-request approval policy is `all_external_contributors`.
-- Root activation wrapper: `scripts/odroid-activate-release.sh` (historic name), installed by hand after each change to it (deploys never update it):
-  ```bash
-  install -o root -g root -m 0755 scripts/odroid-activate-release.sh /usr/local/sbin/hypercal-activate-release
-  ```
+- Root activation wrapper: `scripts/odroid-activate-release.sh` (historic name), installed separately after each accepted change; deploys never update it. Follow "Native activation deadline and recovery (#1031)" above: exact accepted bytes, idle owner, both deployment locks, atomic replacement, root:root 0755 and hash readback, then the ordinary real rerun.
 - `/etc/sudoers.d/hcb-runner` holds exactly:
   ```
   hcb-runner ALL=(root) NOPASSWD: /usr/local/sbin/hypercal-activate-release
@@ -406,7 +541,7 @@ Hosted deploys run on a self-hosted runner on the Banana Pi `bananapi-m4` (since
   3. fetches that artifact by id and requires: name `release-<sha>`, not expired, the digest the status names, and an upload by the run the status links to. That run must have `event` `push`, `head_branch` `main`, `head_sha` the SHA, `path` `.github/workflows/deploy.yml`, and this repository as both `repository` and `head_repository`. A `pull_request_target` run also reports `head_branch` `main`; the event and path checks exclude it;
   4. downloads the artifact zip, following at most 3 redirects itself and never sending the token past the first request, so it does not reach the storage host. It streams the zip into a fresh root-owned `0700` stage `/opt/hypercal/.incoming-<sha>-<time>-<pid>` (each file at most 4 GiB actually written) and refuses unless its sha256 equals that digest;
   5. extracts only the known release paths (`image.tar.gz`, `docker-compose.yml`, `Caddyfile`, `artifact.json`, the six core `scripts/` files the build copies, and the optional helper files named in the wrapper's `OPTIONAL_SCRIPTS` / `OPTIONAL`: `odroid-deploy-lock.sh`, `deploy-health.py`, `deploy-evidence.py` and `log-retention.py`), never names taken from the zip, then deletes the zip. The helpers are optional only for the wrapper: `deploy-prebuilt-image.sh` refuses a release that lacks one it needs, so a release built before them still unpacks but the new activator never runs without them;
-  6. computes the archive sha256 and, with the staged `scripts/release-artifact.py`, the image config digest, and runs the staged `scripts/deploy-prebuilt-image.sh` with an empty environment at `nice 10` / `ionice -c2 -n7`. It returns the activator's exit code and always removes the stage. Refusals exit 2.
+  6. computes the archive sha256 and, with the staged `scripts/release-artifact.py`, the image config digest, requires the native activation protocol, and starts the staged `scripts/deploy-prebuilt-image.sh` in its own session with a clean environment at `nice 10` / `ionice -c2 -n7`. The 2700/1500-second deadline/recovery contract above governs cancellation and proof-based cleanup. Unresolved recovery retains the stage. Refusals before activation exit 2.
 
   Residual risk: code running as `hcb-runner` (a job, or a process a job left behind) can at most redeploy the release that main's GitHub-hosted build job recorded. Artifacts it uploads itself are never deployed, and it cannot supply files, scripts or checksums. The `release-artifact` status itself can be posted only by a token with `statuses: write`: the hosted build job, or a collaborator with write access (whose branch workflows can request that permission). Combined with a backdoor planted on the runner, a malicious write collaborator could still reach root here; fork pull requests cannot (their tokens are read-only). While the zip and the extracted image are both on disk, a deploy needs about twice the archive size free under `/opt/hypercal`.
 - Secrets never go on a command line in a job that runs here: every local user can read process argument lists (`ps`, `/proc/*/cmdline`). The token reaches the wrapper on stdin. A job's environment is readable too (`/proc/<pid>/environ`) by anything running as `hcb-runner`. So a job on a self-hosted runner, in any workflow, gets no secret except its short-lived `GITHUB_TOKEN`. The deploy success and failure notifications (`BOT_TOKEN`, `BOT_ADMIN_ID`, `ADMIN_ALERT_TOKEN`) run in the GitHub-hosted jobs `notify-success` and `notify-failure`. `test/regressions/hosted-release-contract.test.ts` checks the secrets rule across all workflows. It and `test/python/test_odroid_activate_release.py` also look for the token in every process's argv during the run.
@@ -502,7 +637,7 @@ The committed `bun.lock` is frozen-installable on linux (verified 2026-10-27 wit
 - **CI** (linux, `deploy.yml` and `pr-ci.yml`): `bun install --frozen-lockfile` as the first install. Never run a plain `bun install` before it: that rewrites `bun.lock` in the runner and the frozen check then passes on a lockfile nobody committed (GH-870). The install keeps lifecycle scripts, so `scripts/install-git-hooks.sh` runs as on a developer checkout.
 - **Docker** (linux): `bun install --ignore-scripts` with the copied `bun.lock` — respects the lockfile's version pins and skips the lefthook postinstall (no git in the image).
 - **Local**: `bun install --frozen-lockfile` to reproduce CI; a plain `bun install` only when you are deliberately updating `bun.lock`.
-- **Local release fallback** (`scripts/deploy-local-fallback.sh`): `bun install --frozen-lockfile --ignore-scripts` — the same frozen check, without lifecycle scripts because it builds a release, not a developer checkout.
+- **Retained local release builder** (`scripts/deploy-local-fallback.sh`): its historical body uses `bun install --frozen-lockfile --ignore-scripts`. The current entry point refuses before installation or build because it cannot provide the private native activation protocol; this is not an available deployment route.
 
 ## bun install --production in Docker
 
