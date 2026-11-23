@@ -251,7 +251,7 @@ const config = loadConfig();
 const summarize = slots => slots.map(slot => ({{provider: slot.provider, model: slot.configuredModel}}));
 const chains = {{smart: summarize(buildSmartChain(config)), fast: summarize(buildFastChain(config))}};
 for (const role of ["planner", "executor", "repair"]) chains[role] = summarize(buildRoleChain(role, config));
-console.log("STAGE_PROFILE_CHAINS " + JSON.stringify(chains));
+process.stdout.write("STAGE_PROFILE_CHAINS " + JSON.stringify(chains) + "\\n");
 """
         bun = shutil.which("bun")
         self.assertIsNotNone(bun, "the repository's Bun runtime is required for this contract")
