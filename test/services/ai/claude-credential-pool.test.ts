@@ -721,23 +721,50 @@ test('a key timeout is still counted when the backup then fails with a server er
     expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
   }));
 
-test('a key timeout is still counted when the backup then rejects the request outright', () =>
+test.each([
+  {
+    name: 'a key timeout is still counted when the backup then rejects the request outright',
+    primaryElapsedMs: 30,
+    expectedTokens: ['primary', 'backup'],
+    expectedError: { name: 'Error', message: 'bad request', status: 400 },
+    expectedReports: [{ kind: 'claude_credential', recovered: true, elapsedMs: 30, limitMs: 30 }],
+  },
+  {
+    name: 'a delayed primary timeout that exhausts the global budget never starts the backup',
+    primaryElapsedMs: 87,
+    expectedTokens: ['primary'],
+    expectedError: { name: 'CredentialAttemptTimeoutError', message: 'Claude credential request timed out' },
+    expectedReports: [],
+  },
+])('$name', ({ primaryElapsedMs, expectedTokens, expectedError, expectedReports }) =>
   withCountingReporter(async (reporter) => {
-    const pool = createClaudeCredentialPool(
-      ['primary', 'backup'],
-      Date.now,
-      (error) => error instanceof Error && 'status' in error && error.status === 400,
-    );
-    const error = await pool
-      .run(
-        async (token, signal) => {
-          if (token === 'primary') return neverAnswers(token, signal);
-          throw failure(400, 'bad request');
-        },
-        { timeoutMs: 60 },
-      )
-      .catch((caught: unknown) => caught);
-    expect((error as Error).message).toBe('bad request');
-    expect(reporter.reports).toHaveLength(1);
-    expect(reporter.reports[0]).toMatchObject({ kind: 'claude_credential', recovered: true });
+    // Timer delivery can be late on a busy runner. Model the elapsed request time explicitly:
+    // one case leaves a useful backup slice; the other has already exhausted the same 60ms budget.
+    const clock = spyOn(performance, 'now').mockReturnValue(0);
+    const seen: string[] = [];
+    try {
+      const pool = createClaudeCredentialPool(
+        ['primary', 'backup'],
+        Date.now,
+        (error) => error instanceof Error && 'status' in error && error.status === 400,
+      );
+      const error = await pool
+        .run(
+          async (token, signal) => {
+            seen.push(token);
+            if (token === 'primary') {
+              signal.addEventListener('abort', () => clock.mockReturnValue(primaryElapsedMs), { once: true });
+              return neverAnswers(token, signal);
+            }
+            throw failure(400, 'bad request');
+          },
+          { timeoutMs: 60 },
+        )
+        .catch((caught: unknown) => caught);
+      expect(error).toMatchObject(expectedError);
+      expect(seen).toEqual([...expectedTokens]);
+      expect(reporter.reports).toEqual(expectedReports);
+    } finally {
+      clock.mockRestore();
+    }
   }));

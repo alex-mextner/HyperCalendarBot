@@ -4,13 +4,13 @@
 # runner user may run only this file through sudoers.
 #
 # Trust model: PR code never runs here. Root trusts nothing the runner hands it except a commit
-# SHA and a short-lived GitHub token, and the token only authenticates API calls made by the
-# installed LIB/stage-fetch-artifact.py, which verifies the SHA is the head of an open PR of this
+# SHA, a fixed optional model profile and a short-lived GitHub token. The token only authenticates
+# API calls made by the installed LIB/stage-fetch-artifact.py, which verifies the SHA is the head of an open PR of this
 # repository and downloads only the data of the build job's artifact (the image and the case list).
 # Every script root executes comes from LIB, installed from a reviewed main checkout, never from
 # the artifact.
 #
-# Usage: printf '%s\n' "$GITHUB_TOKEN" | sudo -n /usr/local/sbin/hypercal-stage-qa <sha40>
+# Usage: printf '%s\n' "$GITHUB_TOKEN" | sudo -n /usr/local/sbin/hypercal-stage-qa <sha40> [default|opus|glm]
 #        or, as an ssh forced command (SHA in SSH_ORIGINAL_COMMAND, no args):
 #        printf '%s\n' "$GITHUB_TOKEN" | ssh <odroid> <sha40>
 # After the stage is up and guarded the run prints one STAGE_READY {json} line and keeps the stage
@@ -45,6 +45,7 @@ trap '' PIPE
 # Never exported: children must not inherit the token.
 declare +x TOKEN=""
 SHA=""
+MODEL_PROFILE=default
 WORK=""
 CHILD_PID=""
 
@@ -86,12 +87,16 @@ fail() {
 
 # Called as an ssh forced command (an ssh key whose authorized_keys entry names this file) it has no arguments and
 # the client's command line, which sshd leaves in SSH_ORIGINAL_COMMAND, must be exactly the SHA.
-# With one argument (the sudo path, the QA runner's driver scripts/stage-qa-driver.py) the environment is ignored.
-# shellcheck disable=SC2016 # $GITHUB_TOKEN is literal text in the usage line
+# Direct/sudo calls may add one fixed profile; the official driver still passes only the SHA.
+# The forced-command form remains SHA-only, and caller environment never selects a profile.
 case "$#" in
   0) CANDIDATE="${SSH_ORIGINAL_COMMAND-}" ;;
-  1) CANDIDATE="$1" ;;
-  *) fail 'usage: printf "%s\n" "$GITHUB_TOKEN" | hypercal-stage-qa [<sha40>]' ;;
+  1|2) CANDIDATE="$1"; MODEL_PROFILE="${2-default}" ;;
+  *) fail 'usage: hypercal-stage-qa <sha40> [default|opus|glm]' ;;
+esac
+case "$MODEL_PROFILE" in
+  default|opus|glm) ;;
+  *) fail 'model profile must be default, opus or glm' ;;
 esac
 [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail 'revision must be a full 40-character lowercase commit SHA'
 SHA="$CANDIDATE"
@@ -136,4 +141,4 @@ esac
 exec 3< <(printf '%s\n' "$TOKEN")
 TOKEN=""
 trap - EXIT TERM INT HUP
-exec bash "$LIB/stage-qa-run.sh" "$SHA" "$WORK"
+exec bash "$LIB/stage-qa-run.sh" "$SHA" "$WORK" "$MODEL_PROFILE"

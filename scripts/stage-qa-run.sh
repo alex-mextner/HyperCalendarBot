@@ -4,10 +4,11 @@
 # the root entry hypercal-stage-qa, which already holds the stage lock (its fd is inherited) and has
 # put the verified artifact data into <work dir>. Nothing in <work dir> is ever executed.
 #
-# Usage: stage-qa-run.sh <sha40> <work dir>   (GitHub token: one line on fd 3, read once)
+# Usage: stage-qa-run.sh <sha40> <work dir> [default|opus|glm]   (GitHub token: one line on fd 3, read once)
 #
-# Flow: provisioned-files check -> host deploy lock -> "still the PR head" re-check -> disk check +
-# docker load -> bot.env from an allow-list of the prod .env -> fresh stage DB -> compose up ->
+# Flow: provisioned-files/profile check -> host deploy lock -> "still the PR head" re-check -> disk +
+# docker load -> bot.env from prod AI allow-list, stage identity, fixed profile and a fresh owned key ->
+# fresh stage DB -> compose up ->
 # health -> stage-smoke.py guard -> print STAGE_READY {json} -> wait for the client's DONE line (or
 # EOF) while the cases run elsewhere (the browser host, scripts/stage-qa-browser.py, through qa-cli) ->
 # (always) evidence, compose down, image removal, work dir removal.
@@ -16,7 +17,7 @@
 # to stderr.
 # Exit: 0 passed (DONE/EOF after READY), 1 failed (health/timeout: the PR is wrong), 2 refused (guard),
 # 3 not provisioned, 4 stage could not run (docker load / compose up failed: the cause may be
-# infrastructure or image startup, and there is no test verdict; the report posts `error`), 75 host
+# environment generation, infrastructure or image startup; no test verdict, reported as `error`), 75 host
 # lock wait timed out, 76 superseded. The verdict on the cases is the browser host's.
 # shellcheck disable=SC2329 # the functions below are reached only through traps and step(), which shellcheck cannot see
 set -euo pipefail
@@ -56,9 +57,11 @@ exec 4>&1 1>&2
 declare +x TOKEN=""
 SHA="${1:-}"
 WORK="${2:-}"
+MODEL_PROFILE="${3-default}"
 WORK_OWNED=0
 LOADED=0
 STACK_TOUCHED=0
+ENV_TMP_OWNED=0
 STEP_PID=""
 WATCHDOG_PID=""
 
@@ -83,7 +86,7 @@ compose() {
 save_evidence() {
   local rc="$1"
   timeout 300 python3 "$LIB/deploy-evidence.py" release-logs --container "$CONTAINER" \
-    --logs-root "$STAGE_DIR/evidence" --label "stage-${SHA:0:12}" || echo 'evidence: release-logs failed' >&2
+    --logs-root "$STAGE_DIR/evidence" --label "stage-${SHA:0:12}-${MODEL_PROFILE}" || echo 'evidence: release-logs failed' >&2
   if ((rc != 0)); then
     timeout 300 python3 "$LIB/deploy-evidence.py" failed --container "$CONTAINER" \
       --logs-root "$STAGE_DIR/evidence" --sha "$SHA" || echo 'evidence: failed bundle failed' >&2
@@ -98,6 +101,9 @@ finish() {
   trap - EXIT
   set +e
   [[ -z "$WATCHDOG_PID" ]] || kill "$WATCHDOG_PID" 2>/dev/null
+  if ((ENV_TMP_OWNED)); then
+    rm -f -- "$STAGE_DIR/bot.env.new" || { echo 'teardown: temporary stage environment cleanup failed' >&2; rc=4; }
+  fi
   if ((STACK_TOUCHED)); then
     save_evidence "$rc"
     compose down --timeout 10 || echo 'teardown: compose down failed; the stage may still be up' >&2
@@ -143,6 +149,80 @@ not_provisioned() {
   exit 3
 }
 
+# The preflight and final private-file check share credential semantics. The preflight only reads;
+# the write mode runs after the host lock and appends the key for that run's fresh database.
+configure_environment() {
+  local rc=0
+  python3 - "$1" "$MODEL_PROFILE" "$2" <<'ENVIRONMENT' || rc=$?
+import secrets
+import sys
+from pathlib import Path
+
+path, profile, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+chains = ("AI_SMART_CHAIN", "AI_FAST_CHAIN", "AI_PLANNER_CHAIN",
+          "AI_EXECUTOR_CHAIN", "AI_REPAIR_CHAIN")
+profiles = {
+    "opus": {"provider": "claude", "model": "claude-opus-5-5",
+             "model_keys": ("CLAUDE_MODEL", "CLAUDE_FAST_MODEL"),
+             "credential_keys": ("CLAUDE_API_TOKEN", "CLAUDE_API_TOKEN2")},
+    "glm": {"provider": "zai", "model": "glm-5.3",
+            "model_keys": ("ZAI_MODEL", "ZAI_FAST_MODEL"), "credential_keys": ("ZAI_API_KEY",)},
+}
+
+def configure():
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        if mode != "check":
+            raise
+        print("STAGE_QA_NOT_PROVISIONED: model profile requires the production configuration file",
+              file=sys.stderr)
+        raise SystemExit(3)
+    # Match the existing shell filter's CR removal during preflight, then split on LF only.
+    # All other bytes, including non-UTF-8 and Unicode line separators, survive the write.
+    lines = (raw.replace(b"\r", b"") if mode == "check" else raw).split(b"\n")
+    if lines and not lines[-1]:
+        lines.pop()
+    if profile != "default":
+        selected = profiles[profile]
+        values = {}
+        for line in lines:
+            key, _, value = line.partition(b"=")
+            values[key] = value.decode("utf-8", errors="surrogateescape").strip().strip("\"'").strip()
+        if not any(values.get(key.encode()) for key in selected["credential_keys"]):
+            print("STAGE_QA_NOT_PROVISIONED: model profile " + profile +
+                  " requires its existing provider credential", file=sys.stderr)
+            raise SystemExit(3)
+        if mode == "check":
+            return
+        overrides = {key.encode(): selected["model"].encode() for key in selected["model_keys"]}
+        overrides.update({key.encode(): selected["provider"].encode() for key in chains})
+        lines = [line for line in lines if line.partition(b"=")[0] not in overrides]
+        lines.extend(key + b"=" + value for key, value in overrides.items())
+    # Never import an existing session key, and never generate one during the read-only preflight.
+    lines.append(b"TELEGRAM_SESSION_MASTER_KEY=" + secrets.token_hex(32).encode())
+    path.write_bytes(b"\n".join(lines) + b"\n")
+
+try:
+    configure()
+except Exception as error:
+    # Do not echo env contents or exception text that could include a credential.
+    print("stage-qa-run: environment preparation failed (" + type(error).__name__ + ")", file=sys.stderr)
+    raise SystemExit(4)
+ENVIRONMENT
+  case "$rc" in
+    0|3|4) return "$rc" ;;
+    *) echo 'stage-qa-run: environment interpreter failed' >&2; return 4 ;;
+  esac
+}
+
+# Refuse malformed profile calls before token input, locks or ownership of the work directory.
+(($# >= 2 && $# <= 3)) || die 2 'usage: stage-qa-run.sh <sha40> <work dir> [model profile]'
+case "$MODEL_PROFILE" in
+  default|opus|glm) ;;
+  *) die 2 'model profile must be default, opus or glm' ;;
+esac
+
 # Validate ownership of the work dir BEFORE it can be removed by the exit trap.
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || die 2 'revision must be a full 40-character lowercase commit SHA'
 [[ -n "$WORK" && -d "$WORK" && ! -L "$WORK" && "$(dirname -- "$WORK")" == "$DEPLOY_PATH" &&
@@ -152,6 +232,7 @@ WORK_OWNED=1
 { IFS= read -r -u 3 TOKEN; } 2>/dev/null || true
 exec 3<&-
 [[ -n "$TOKEN" ]] || die 2 'the GitHub token must arrive on fd 3'
+echo "stage-qa-run: model profile $MODEL_PROFILE" >&2 || true
 
 has_value() { grep -Eq "^$2=." "$1"; }
 
@@ -168,6 +249,11 @@ done
 [[ -s "$WORK/stage-smoke-cases.json" ]] || not_provisioned 'the artifact carries no stage-smoke cases'
 [[ -s "$WORK/image.tar.gz" && -s "$WORK/artifact.json" ]] || die 2 'the verified artifact is incomplete'
 
+# A missing selected credential should not wait behind a production deploy or load an image.
+# The generated environment is checked again after the lock, in case production changed meanwhile.
+if [[ "$MODEL_PROFILE" != default ]]; then
+  configure_environment "$DEPLOY_PATH/.env" check || exit $?
+fi
 install -d -m 0700 "$STAGE_DIR/evidence"
 
 # --- host deploy lock: the stage instance must never overlap a prod (or ExpenseSyncBot) deploy. ---
@@ -239,17 +325,26 @@ step load_image || die 4 'docker load failed'
 LOADED_ID="$(docker image inspect "$IMAGE_REPO:$SHA" --format '{{.Id}}')"
 [[ "$LOADED_ID" == "$EXPECTED_IMAGE_ID" ]] || die 2 'loaded stage image identity does not match the verified artifact'
 
-# --- bot.env: allow-list of prod .env + the stage bot's own identity, nothing else ---
+# --- bot.env: prod AI allow-list, stage identity and a fresh stage-only session key ---
 build_bot_env() {
   local target="$STAGE_DIR/bot.env" tmp="$STAGE_DIR/bot.env.new"
+  # The validated run holds the stage and host locks. Only this owned temporary file is cleaned up.
+  ENV_TMP_OWNED=1
+  install -m 0600 /dev/null "$tmp" || return 4
   {
     if [[ -f "$DEPLOY_PATH/.env" ]]; then tr -d '\r' <"$DEPLOY_PATH/.env" | grep -E "$ALLOWED_ENV" || true; fi
-    for key in BOT_TOKEN BOT_USERNAME; do grep -E "^$key=" "$STAGE_DIR/stage.env" | tail -n 1; done
-  } >"$tmp"
-  chmod 0600 "$tmp"
-  mv -f "$tmp" "$target"
+    for key in BOT_TOKEN BOT_USERNAME; do
+      grep -E "^$key=" "$STAGE_DIR/stage.env" | tail -n 1 || return 4
+    done
+  } >"$tmp" || return 4
+  configure_environment "$tmp" write || return $?
+  chmod 0600 "$tmp" || return 4
+  mv -f "$tmp" "$target" || return 4
+  ENV_TMP_OWNED=0
 }
-build_bot_env
+environment_rc=0
+build_bot_env || environment_rc=$?
+((environment_rc == 0)) || die "$environment_rc" 'could not prepare the stage environment'
 
 # Fresh database every run: a PR must not see (or depend on) rows an earlier PR left behind.
 install -d -m 0755 "$STAGE_DIR/data" "$STAGE_DIR/logs"
@@ -284,9 +379,9 @@ step run_guard || guard_rc=$?
 
 # Only the validated fields go to the client, as one compact line.
 READY_LINE="$(
-  python3 - "$SHA" "$WORK/guard.out" <<'READY'
+  python3 - "$SHA" "$WORK/guard.out" "$MODEL_PROFILE" <<'READY'
 import json, re, sys
-sha, path = sys.argv[1:]
+sha, path, model_profile = sys.argv[1:]
 lines = [l for l in open(path, encoding="utf-8").read().splitlines() if l.startswith("STAGE_GUARD ")]
 try:
     if len(lines) != 1:
@@ -302,7 +397,8 @@ try:
 except (ValueError, KeyError, TypeError) as error:
     print(f"stage guard output rejected: {error}", file=sys.stderr)
     raise SystemExit(1)
-print(json.dumps({"sha": sha, "username": username, "peer": peer, "cases": cases, "base_cases": base},
+print(json.dumps({"sha": sha, "username": username, "peer": peer, "cases": cases, "base_cases": base,
+                  "model_profile": model_profile},
                  separators=(",", ":"), ensure_ascii=True))
 READY
 )" || die 2 'the stage guard printed no valid STAGE_GUARD line'
