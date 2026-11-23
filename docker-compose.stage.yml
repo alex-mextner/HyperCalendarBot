@@ -7,8 +7,8 @@
 #   * its own SQLite file (stage/data) and its own Redis container with its own password, so
 #     queues, reminders and cron cannot reach prod users or prod jobs;
 #   * no MTProto service tier, Google OAuth, e-mail or inline bot: the bot.env that
-#     scripts/stage-qa-run.sh builds keeps only the stage bot's token and an allow-list of
-#     AI-provider keys from the production .env;
+#     scripts/stage-qa-run.sh builds uses the stage bot's token, the unchanged production
+#     AI-provider allow-list, a fresh stage-only session key and optional fixed model profiles;
 #   * its own published port, bound to loopback.
 # The image under test is pinned by an override file the run writes (the pull request's build,
 # loaded from its verified artifact), as the prod deploy does; this file never names a registry.

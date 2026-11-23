@@ -30,7 +30,7 @@ class Teardown(StageWorld):
         self.assertTrue(self.has_event("evidence release-logs"))
         self.assertLess(self.index_of("evidence"), self.index_of("compose-down"))
         self.assertTornDown()
-        self.assertTrue((self.stage / "evidence" / f"release-stage-{SHA[:12]}").is_dir())
+        self.assertTrue((self.stage / "evidence" / f"release-stage-{SHA[:12]}-default").is_dir())
         self.assertTrue(lock_is_free(self.stage_lock))
         self.assertTrue(lock_is_free(self.host_lock))
 

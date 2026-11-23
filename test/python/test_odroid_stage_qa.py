@@ -45,7 +45,7 @@ class RunOutcomes(StageWorld):
         self.assertFalse(self.has_event("evidence failed"))
         self.assertFalse((self.stage / "receipts").exists())
         self.assertTrue(
-            (self.stage / "evidence" / f"release-stage-{SHA[:12]}" / "container.log").is_file()
+            (self.stage / "evidence" / f"release-stage-{SHA[:12]}-default" / "container.log").is_file()
         )
         self.assertTornDown()
         self.assertNoSecrets(result)
@@ -64,6 +64,7 @@ class RunOutcomes(StageWorld):
             ready,
             {
                 "sha": SHA,
+                "model_profile": "default",
                 "username": "hypercal_stage_bot",
                 "peer": "7654321",
                 "cases": GUARD_JSON["cases"],
@@ -277,7 +278,7 @@ class BotEnvAndDatabase(StageWorld):
         result = self.run_entry()
         self.assertOutcome(result, 0, "passed")
         env = self.bot_env()
-        self.assertEqual(set(env), ALLOWED_KEYS)
+        self.assertEqual(set(env), ALLOWED_KEYS | {"TELEGRAM_SESSION_MASTER_KEY"})
         self.assertEqual(env["BOT_TOKEN"], STAGE_BOT_TOKEN)
         self.assertEqual(env["BOT_USERNAME"], "hypercal_stage_bot")
         self.assertEqual(env["ZAI_API_KEY"], "zai-secret")
@@ -315,7 +316,7 @@ class BotEnvAndDatabase(StageWorld):
     def test_bot_env_is_built_even_when_prod_env_is_missing_the_allow_listed_keys(self):
         (self.deploy / ".env").write_text(f"BOT_TOKEN={PROD_BOT_TOKEN}\n")
         self.assertOutcome(self.run_entry(), 0, "passed")
-        self.assertEqual(set(self.bot_env()), {"BOT_TOKEN", "BOT_USERNAME"})
+        self.assertEqual(set(self.bot_env()), {"BOT_TOKEN", "BOT_USERNAME", "TELEGRAM_SESSION_MASTER_KEY"})
 
 
 class NotProvisioned(StageWorld):
