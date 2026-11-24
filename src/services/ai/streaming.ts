@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL}
-//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL}
+//   SMART_CHAIN (main): configured order, otherwise Groq ${GROQ_MODEL} → HF ${HF_MODEL} → z.ai ${ZAI_MODEL} → Claude ${CLAUDE_MODEL}
+//   FAST_CHAIN: configured order, otherwise Groq ${GROQ_FAST_MODEL} → HF ${HF_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → Claude ${CLAUDE_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -762,6 +762,7 @@ function buildChain(
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
     for (const provider of ids) {
+      if (provider === 'gemini') continue;
       const { model, apiKey, baseUrl } = available[provider];
       if (!model || !apiKey) {
         logOnce(`skip:${kind}:${provider}:${!!model}:${!!apiKey}`, () => {
@@ -792,8 +793,8 @@ function buildChain(
   // one path where the configured order could not be honoured.
   const fallback = slotsFor(fallbackOrder);
   if (fallback.length === 0) {
-    // Not reachable today — loadConfig requires the z.ai, HF and Gemini
-    // credentials and refuses to start without them, so at least three
+    // Not reachable today — loadConfig requires the z.ai and HF
+    // credentials and refuses to start without them, so at least two
     // providers always have both. Kept because that is a startup rule, not an
     // invariant of this function, and an empty chain fails every request.
     logOnce(`none:${kind}:${order.join(',')}`, () =>

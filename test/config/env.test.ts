@@ -99,8 +99,8 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
-    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+    const SMART_DEFAULT: ProviderId[] = ['groq', 'hf', 'zai', 'claude'];
+    const FAST_DEFAULT: ProviderId[] = ['groq', 'hf', 'zai', 'claude'];
 
     test('main and fast defaults prefer responsive providers while using their own configured models', () => {
       const config = loadConfig();
@@ -113,7 +113,7 @@ describe('loadConfig', () => {
     test('the fast chain reads its own variable and keeps its own fallback', () => {
       process.env.AI_FAST_CHAIN = 'gemini,zai';
       const config = loadConfig();
-      expect(config.AI_FAST_CHAIN).toEqual({ order: ['gemini', 'zai'], fromEnv: true, fallback: FAST_DEFAULT });
+      expect(config.AI_FAST_CHAIN).toEqual({ order: ['zai'], fromEnv: true, fallback: FAST_DEFAULT });
       expect(config.AI_SMART_CHAIN.order).toEqual(SMART_DEFAULT);
     });
 
@@ -122,7 +122,7 @@ describe('loadConfig', () => {
     test('takes the order from the environment', () => {
       process.env.AI_SMART_CHAIN = 'gemini, hf ,zai';
       expect(loadConfig().AI_SMART_CHAIN).toEqual({
-        order: ['gemini', 'hf', 'zai'],
+        order: ['hf', 'zai'],
         fromEnv: true,
         fallback: SMART_DEFAULT,
       });
@@ -191,24 +191,24 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('HF_FAST_MODEL');
   });
 
-  test('throws if GEMINI_API_KEY is missing', () => {
+  test('retired GEMINI_API_KEY is optional', () => {
     delete process.env.GEMINI_API_KEY;
-    expect(() => loadConfig()).toThrow('GEMINI_API_KEY');
+    expect(loadConfig().GEMINI_API_KEY).toBe('');
   });
 
-  test('throws if GEMINI_BASE_URL is missing', () => {
+  test('retired GEMINI_BASE_URL is optional', () => {
     delete process.env.GEMINI_BASE_URL;
-    expect(() => loadConfig()).toThrow('GEMINI_BASE_URL');
+    expect(loadConfig().GEMINI_BASE_URL).toBe('');
   });
 
-  test('throws if GEMINI_MODEL is missing', () => {
+  test('retired GEMINI_MODEL is optional', () => {
     delete process.env.GEMINI_MODEL;
-    expect(() => loadConfig()).toThrow('GEMINI_MODEL');
+    expect(loadConfig().GEMINI_MODEL).toBe('');
   });
 
-  test('throws if GEMINI_FAST_MODEL is missing', () => {
+  test('retired GEMINI_FAST_MODEL is optional', () => {
     delete process.env.GEMINI_FAST_MODEL;
-    expect(() => loadConfig()).toThrow('GEMINI_FAST_MODEL');
+    expect(loadConfig().GEMINI_FAST_MODEL).toBe('');
   });
 
   test('retired AGENT_JWT_SECRET is absent from config when unset', () => {

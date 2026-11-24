@@ -85,7 +85,9 @@ function buildFakeClient(script: ScriptEvent[] | (() => never)) {
 // biome-ignore lint/suspicious/noExplicitAny: fake client shapes vary per test
 let fakeZai: any;
 // biome-ignore lint/suspicious/noExplicitAny: same reason
-let fakeGemini: any;
+let fakeClaude: any;
+// biome-ignore lint/suspicious/noExplicitAny: retired provider must never be invoked
+let retiredGemini: any;
 // biome-ignore lint/suspicious/noExplicitAny: same reason
 let fakeHf: any;
 
@@ -116,22 +118,22 @@ beforeEach(() => {
     ZAI_MODEL: 'zai-main',
     ZAI_FAST_MODEL: 'zai-fast',
     GROQ_API_KEY: '',
-    GEMINI_API_KEY: 'gemini-key',
-    GEMINI_BASE_URL: 'https://gemini.example/v1',
-    GEMINI_MODEL: 'gemini-main',
-    GEMINI_FAST_MODEL: 'gemini-fast',
+    CLAUDE_API_TOKEN: 'claude-key',
+    CLAUDE_MODEL: 'claude-main',
+    CLAUDE_FAST_MODEL: 'claude-fast',
     HF_TOKEN: 'hf-token',
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
     // Pinned: these tests assert on the order failures come back in, which is
     // configuration and changes whenever a provider's tier does.
-    AI_SMART_CHAIN: 'zai,groq,gemini,hf',
-    AI_FAST_CHAIN: 'zai,groq,gemini,hf',
+    AI_SMART_CHAIN: 'zai,groq,claude,hf',
+    AI_FAST_CHAIN: 'zai,groq,claude,hf',
   });
   providerClients.zai = () => fakeZai;
   providerClients.groq = () => fakeGroq;
-  providerClients.gemini = () => fakeGemini;
+  providerClients.claude = () => fakeClaude;
+  providerClients.gemini = () => retiredGemini;
   providerClients.hf = () => fakeHf;
 });
 
@@ -150,7 +152,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     _resetStreamingUsageCompatibilityForTest();
     fakeZai = undefined;
     fakeGroq = undefined;
-    fakeGemini = undefined;
+    fakeClaude = undefined;
     fakeHf = undefined;
   });
 
@@ -159,8 +161,8 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
 
   test('a safety stop is explicit and is not retried through another provider', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini,hf';
-    fakeGemini = buildFakeClient([{ kind: 'finish', reason: 'content_filter' }]);
+    process.env.AI_SMART_CHAIN = 'claude,hf';
+    fakeClaude = buildFakeClient([{ kind: 'finish', reason: 'content_filter' }]);
     fakeHf = buildFakeClient([{ kind: 'text', text: 'must not bypass stop' }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       name: 'ProviderSafetyStopError',
@@ -169,8 +171,8 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
 
   test('a structured refusal delta stops fallback without exposing refusal contents', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini,hf';
-    fakeGemini = {
+    process.env.AI_SMART_CHAIN = 'claude,hf';
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () =>
@@ -193,16 +195,16 @@ describe('aiStreamRound — provider chain fallback', () => {
     '[]',
     'null',
   ])('invalid or non-object tool arguments cannot become executable output: %s', async (args) => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    fakeGemini = buildFakeClient([{ kind: 'tool', id: 'bad-args', name: 'calculate', args }]);
+    process.env.AI_SMART_CHAIN = 'claude';
+    fakeClaude = buildFakeClient([{ kind: 'tool', id: 'bad-args', name: 'calculate', args }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'malformed_tools' } }],
     });
   });
 
   test('orphan argument fragments are diagnosed as malformed tool output', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    fakeGemini = {
+    process.env.AI_SMART_CHAIN = 'claude';
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () =>
@@ -219,20 +221,20 @@ describe('aiStreamRound — provider chain fallback', () => {
   });
 
   test('an incomplete tool declaration is not accepted as usable output', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    fakeGemini = buildFakeClient([{ kind: 'tool', id: 'incomplete', name: '', args: '{}' }]);
+    process.env.AI_SMART_CHAIN = 'claude';
+    fakeClaude = buildFakeClient([{ kind: 'tool', id: 'incomplete', name: '', args: '{}' }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'malformed_tools', toolFragmentCount: 1, choiceCount: 1 } }],
     });
   });
 
   test('no chunks and usage-only streams remain distinguishable diagnostics', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    fakeGemini = buildFakeClient([]);
+    process.env.AI_SMART_CHAIN = 'claude';
+    fakeClaude = buildFakeClient([]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'no_chunks', chunkCount: 0, choiceCount: 0, usage: null } }],
     });
-    fakeGemini = buildFakeClient([{ kind: 'usage', prompt: 10, completion: 128, reasoning: 128 }]);
+    fakeClaude = buildFakeClient([{ kind: 'usage', prompt: 10, completion: 128, reasoning: 128 }]);
     await expect(aiStreamRound({ messages: [], maxTokens: 128 })).rejects.toMatchObject({
       failures: [{ emptyResponse: { classification: 'reasoning_only', chunkCount: 1, choiceCount: 0 } }],
     });
@@ -251,7 +253,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([{ kind: 'text', text: 'fallback after cleanup' }]);
+    fakeClaude = buildFakeClient([{ kind: 'text', text: 'fallback after cleanup' }]);
     const started = performance.now();
     const result = await aiStreamRound({ messages: [], maxTokens: 128, providerTimeoutMs: 20 });
     expect(result.text).toBe('fallback after cleanup');
@@ -276,8 +278,8 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(result.finishReason).toBe('length');
   });
   test('preserves finish/usage/request shape of empty output without prompt content', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    fakeGemini = {
+    process.env.AI_SMART_CHAIN = 'claude';
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () =>
@@ -307,7 +309,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(failure?.failures[0]).toMatchObject({
       emptyResponse: {
         finishReason: 'length',
-        maxOutputTokens: 128,
+        maxOutputTokens: 128000,
         chunkCount: 2,
         usage: { promptTokens: 40, completionTokens: 0, reasoningTokens: 128 },
       },
@@ -329,7 +331,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([{ kind: 'text', text: 'fallback ready' }]);
+    fakeClaude = buildFakeClient([{ kind: 'text', text: 'fallback ready' }]);
     const visible: string[] = [];
     const result = await aiStreamRound(
       { messages: [{ role: 'user', content: 'synthetic' }], maxTokens: 128, providerTimeoutMs: 20 },
@@ -347,56 +349,34 @@ describe('aiStreamRound — provider chain fallback', () => {
     await expect(aiStreamRound({ messages: [], maxTokens: 128, signal })).rejects.toThrow();
     expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
   });
-  test('tiny fast Gemini 2.5 Flash calls disable thinking, but main calls keep their reasoning policy', async () => {
-    process.env.AI_SMART_CHAIN = 'gemini';
-    process.env.AI_FAST_CHAIN = 'gemini';
-    process.env.GEMINI_FAST_MODEL = 'models/gemini-2.5-flash';
-    fakeGemini = buildFakeClient([{ kind: 'text', text: 'ready' }]);
-    await aiStreamRound({ messages: [], maxTokens: 256, fast: true });
-    expect(fakeGemini.chat.completions.create.mock.calls[0][0].reasoning_effort).toBe('none');
-    await aiStreamRound({ messages: [], maxTokens: 4096 });
-    expect(fakeGemini.chat.completions.create.mock.calls[1][0].reasoning_effort).toBeUndefined();
+  test('retired Gemini cannot be selected even with a configured fast model', async () => {
+    process.env.AI_FAST_CHAIN = 'gemini,hf';
+    retiredGemini = buildFakeClient([{ kind: 'text', text: 'must not call' }]);
+    fakeHf = buildFakeClient([{ kind: 'text', text: 'reserve' }]);
+    expect((await aiStreamRound({ messages: [], maxTokens: 256, fast: true })).text).toBe('reserve');
+    expect(retiredGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  test('Gemini local budget skips network rather than waiting when exhausted', async () => {
-    const { mkdtempSync, rmSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'hcb-quota-'));
-    process.env.DATABASE_PATH = join(dir, 'calendar.db');
-    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+  test('retired Gemini spends no local quota budget or network request', async () => {
     process.env.AI_SMART_CHAIN = 'gemini,hf';
-    fakeGemini = buildFakeClient([{ kind: 'text', text: 'gemini' }]);
+    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+    retiredGemini = buildFakeClient([{ kind: 'text', text: 'must not call' }]);
     fakeHf = buildFakeClient([{ kind: 'text', text: 'reserve' }]);
-    try {
-      expect((await aiStreamRound({ messages: [], maxTokens: 128 })).text).toBe('gemini');
-      expect((await aiStreamRound({ messages: [], maxTokens: 128 })).text).toBe('reserve');
-      expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect((await aiStreamRound({ messages: [], maxTokens: 128 })).text).toBe('reserve');
+    expect(retiredGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  test('unavailable local quota storage skips without blaming Gemini or sending HTTP', async () => {
-    const { mkdtempSync, rmSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'hcb-bad-quota-'));
-    process.env.DATABASE_PATH = join(dir, 'missing', 'calendar.db');
-    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+  test('retired Gemini does not depend on quota storage availability', async () => {
+    process.env.DATABASE_PATH = '/nonexistent/synthetic/calendar.db';
     process.env.AI_SMART_CHAIN = 'gemini,hf';
-    fakeGemini = buildFakeClient([{ kind: 'text', text: 'must not call' }]);
+    process.env.GEMINI_RATE_LIMITS = JSON.stringify({ scope: 'fake-project', rpm: 1, tpm: 50000, rpd: 10 });
+    retiredGemini = buildFakeClient([{ kind: 'text', text: 'must not call' }]);
     fakeHf = buildFakeClient([{ kind: 'text', text: 'reserve' }]);
-    try {
-      const result = await aiStreamRound({ messages: [], maxTokens: 128 });
-      expect(result.text).toBe('reserve');
-      expect(result.metrics?.attemptCount).toBe(1);
-      expect(result.metrics?.failedProviders).toEqual([]);
-      expect(result.metrics?.skippedProviders).toEqual([{ provider: 'gemini', model: 'gemini-main' }]);
-      expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const result = await aiStreamRound({ messages: [], maxTokens: 128 });
+    expect(result.text).toBe('reserve');
+    expect(result.metrics?.failedProviders).toEqual([]);
+    expect(result.metrics?.skippedProviders).toEqual([]);
+    expect(retiredGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('returns z.ai result on first success', async () => {
@@ -404,8 +384,8 @@ describe('aiStreamRound — provider chain fallback', () => {
       { kind: 'text', text: 'hello from z.ai' },
       { kind: 'finish', reason: 'stop' },
     ]);
-    fakeGemini = buildFakeClient(() => {
-      throw new Error('gemini should not be called');
+    fakeClaude = buildFakeClient(() => {
+      throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
@@ -419,7 +399,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(result.text).toBe('hello from z.ai');
     expect(result.providerUsed).toContain('z.ai');
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
-    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('captures terminal usage-only chunk and requests streaming usage', async () => {
@@ -476,7 +456,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeZai.chat.completions.create.mock.calls[2]?.[0]?.stream_options).toBeUndefined();
   });
 
-  test('falls through to Gemini on z.ai 500', async () => {
+  test('falls through to Claude on z.ai 500', async () => {
     const apiError = new OpenAI.APIError(500, { error: { message: 'overloaded' } }, 'server error', new Headers());
     fakeZai = {
       chat: {
@@ -487,8 +467,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'hello from Gemini' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'hello from Claude' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -500,18 +480,18 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('hello from Gemini');
-    expect(result.providerUsed).toContain('Gemini');
+    expect(result.text).toBe('hello from Claude');
+    expect(result.providerUsed).toContain('Claude');
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('falls through on EmptyProviderResponseError (z.ai coding endpoint quirk)', async () => {
     // z.ai returns 200 OK but no text and no tool calls — streaming adapter
-    // should throw EmptyProviderResponseError and chain should try Gemini.
+    // should throw EmptyProviderResponseError and chain should try Claude.
     fakeZai = buildFakeClient([{ kind: 'finish', reason: 'stop' }]);
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'gemini to the rescue' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'claude to the rescue' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -523,9 +503,9 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('gemini to the rescue');
+    expect(result.text).toBe('claude to the rescue');
     expect(result.metrics).toMatchObject({ failedProviders: [{ provider: 'zai', model: 'zai-main' }] });
-    expect(result.providerUsed).toContain('Gemini');
+    expect(result.providerUsed).toContain('Claude');
   });
 
   test('all three providers fail → throws an aggregate naming every provider', async () => {
@@ -541,7 +521,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = {
+    fakeClaude = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -589,8 +569,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'gemini answered anyway' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'claude answered anyway' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -602,8 +582,8 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('gemini answered anyway');
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('claude answered anyway');
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('400 with no body falls through to next provider', async () => {
@@ -618,8 +598,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'gemini picked up' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'claude picked up' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -631,8 +611,8 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('gemini picked up');
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('claude picked up');
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('400 with no body is retried once on the same provider before falling through', async () => {
@@ -654,8 +634,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient(() => {
-      throw new Error('gemini should not be called');
+    fakeClaude = buildFakeClient(() => {
+      throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
@@ -668,7 +648,7 @@ describe('aiStreamRound — provider chain fallback', () => {
 
     expect(result.text).toBe('zai recovered');
     expect(calls).toBe(2);
-    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('retries a second empty 400 only once, then falls through', async () => {
@@ -682,19 +662,19 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'gemini fallback' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'claude fallback' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
     });
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
-    expect(result.text).toBe('gemini fallback');
+    expect(result.text).toBe('claude fallback');
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(2);
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
     expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
-    expect(result.metrics?.attemptCount).toBe(3); // z.ai twice + Gemini once
+    expect(result.metrics?.attemptCount).toBe(3); // z.ai twice + Claude once
   });
 
   test('caller abort never triggers the empty-400 retry', async () => {
@@ -710,8 +690,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient(() => {
-      throw new Error('gemini should not be called');
+    fakeClaude = buildFakeClient(() => {
+      throw new Error('claude should not be called');
     });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
@@ -720,7 +700,7 @@ describe('aiStreamRound — provider chain fallback', () => {
       aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, signal: controller.signal }),
     ).rejects.toThrow();
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(0);
-    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeClaude.chat.completions.create).not.toHaveBeenCalled();
     expect(fakeHf.chat.completions.create).not.toHaveBeenCalled();
   });
 
@@ -740,7 +720,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
+    fakeClaude = buildFakeClient([
       { kind: 'text', text: 'normal fallback' },
       { kind: 'finish', reason: 'stop' },
     ]);
@@ -750,7 +730,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
     expect(result.text).toBe('normal fallback');
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeClaude.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('mid-stream failure after text emitted discards the partial text and falls through', async () => {
@@ -770,8 +750,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'full answer from Gemini' },
+    fakeClaude = buildFakeClient([
+      { kind: 'text', text: 'full answer from Claude' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -793,13 +773,13 @@ describe('aiStreamRound — provider chain fallback', () => {
       },
     );
 
-    expect(result.text).toBe('full answer from Gemini');
-    expect(deltas).toEqual(['partial ', 'full answer from Gemini']);
+    expect(result.text).toBe('full answer from Claude');
+    expect(deltas).toEqual(['partial ', 'full answer from Claude']);
     expect(switched).toBe(1);
   });
 
   test('aggregates tool_calls across chunks even when provider omits index field', async () => {
-    // HF Router / early Gemini historical bug: tool_call deltas arrive without `index`.
+    // HF Router / early Claude historical bug: tool_call deltas arrive without `index`.
     // Without a fallback the Map collapses both chunks into the same slot.
     fakeZai = {
       chat: {
@@ -834,7 +814,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient(() => {
+    fakeClaude = buildFakeClient(() => {
       throw new Error('unreachable');
     });
     fakeHf = buildFakeClient(() => {

@@ -9,14 +9,14 @@ import { type GroqTokenLimits, parseGroqTokenLimits } from './groq-token-limits.
  * Explicit operator order wins; token-fit guards, circuits and fallback stay intact.
  * Claude follows z.ai: the paid reserve, skipped without CLAUDE_API_TOKEN or the chain's model.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['groq', 'hf', 'zai', 'claude'];
 /** Short requests try responsive providers first. Explicit operator order still wins.
  * September 18 runtime probes: old order spent 15s on z.ai before a healthy provider;
- * Groq OSS20B and Gemini each completed independently in under 1s. Empty responses,
+ * Groq OSS20B completed independently in under 1s. Empty responses,
  * exhausted quotas and oversized Groq payloads retain the normal guarded fallback.
  * Claude follows z.ai here too, with its own fast model.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai', 'claude'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'hf', 'zai', 'claude'];
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -42,6 +42,12 @@ function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
   for (const part of raw.split(',')) {
     const id = part.trim();
     if (!id) continue;
+    if (id === 'gemini') {
+      logOnce(`${name}:disabled:gemini`, () =>
+        logger.warn({ name, id }, 'Gemini is disabled — ignoring retired provider in chain order'),
+      );
+      continue;
+    }
     const known = PROVIDER_IDS.find((candidate): candidate is ProviderId => candidate === id);
     if (!known) {
       logOnce(`${name}:unknown:${id}`, () =>
@@ -217,11 +223,11 @@ export function loadConfig(): EnvConfig {
     HF_MODEL: requireEnv('HF_MODEL'),
     HF_FAST_MODEL: requireEnv('HF_FAST_MODEL'),
 
-    // Gemini
-    GEMINI_API_KEY: requireEnv('GEMINI_API_KEY'),
-    GEMINI_BASE_URL: requireEnv('GEMINI_BASE_URL'),
-    GEMINI_MODEL: requireEnv('GEMINI_MODEL'),
-    GEMINI_FAST_MODEL: requireEnv('GEMINI_FAST_MODEL'),
+    // Retired provider: legacy adapter fields do not require credentials.
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+    GEMINI_BASE_URL: process.env.GEMINI_BASE_URL || '',
+    GEMINI_MODEL: process.env.GEMINI_MODEL || '',
+    GEMINI_FAST_MODEL: process.env.GEMINI_FAST_MODEL || '',
 
     REDIS_URL,
     GOOGLE_CLIENT_ID,

@@ -231,11 +231,12 @@ provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
 layer and the AI layer can derive from it without a cycle. Add a provider there and it is
 nameable at once.
 A provider whose model or key is missing is skipped and the skip is logged — in practice
-that means Groq and Claude, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
+that means Groq and Claude, since `loadConfig()` requires the z.ai and Hugging Face credentials
 and refuses to start without them. An unknown name is ignored with a warning, an order
 naming nothing known falls back to the default order, and an order whose providers are all
 unconfigured falls back to the default order over whatever IS configured (logged as an
-error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
+error). Gemini is retired: both configured orders and runtime fallback ignore it. Its legacy adapter is retained for historical fixtures, and its credentials are optional.
+Reordering during an incident is an `.env` edit and a restart — do not hardcode
 a new order in `streaming.ts`.
 
 **A depleted or rejected provider account is skipped, not retried**: `src/services/ai/provider-circuit.ts`
