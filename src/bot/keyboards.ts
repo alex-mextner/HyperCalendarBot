@@ -185,11 +185,6 @@ export function recurrenceEndKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
-// Cancel button for add-event scene steps that show no other keyboard
-export function cancelKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
-  return new InlineKeyboard().text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
-}
-
 // Skip button for optional scene steps
 export function skipKeyboard(lang: 'en' | 'ru', stepIndex: number): InlineKeyboard {
   return new InlineKeyboard()

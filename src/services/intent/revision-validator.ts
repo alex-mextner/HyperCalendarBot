@@ -9,7 +9,7 @@ import { normalize } from './normalizer.ts';
 import type { DroppedRules, ExampleDisposition, RevisionBody, RevisionOperation } from './revision-body.ts';
 import type { StoredRule } from './revision-ledger.ts';
 import { digestsByName, type RuleDefinition, seedFingerprint } from './rule-fingerprint.ts';
-import { canonicalMetadata } from './seed-catalog.ts';
+import { CANONICAL_NAMESPACE, canonicalMetadata } from './seed-catalog.ts';
 import { type CanonicalSeed, validateCanonicalSeed } from './seed-replacement.ts';
 import { readWorkflowVersion } from './workflow-input.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
@@ -178,7 +178,7 @@ function checkDraftNames(operations: readonly RevisionOperation[], registry: Reg
       if (!DRAFT_NAME.test(name) || name.length > 128) errors.push(`${name}: names are lowercase dotted snake_case`);
       if (taken.has(name)) errors.push(`${name}: name is held by another intent`);
       if (drafted.has(name)) errors.push(`${name}: name is drafted twice`);
-      if (name.startsWith('basis.') && !(op.kind !== 'create' && op.sourceNames.includes(name)))
+      if (name.startsWith(CANONICAL_NAMESPACE) && !(op.kind !== 'create' && op.sourceNames.includes(name)))
         errors.push(`${name}: only the operation replacing a basis rule may keep its basis name`);
       drafted.add(name);
     }

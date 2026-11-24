@@ -8,7 +8,11 @@ import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
-import { resolveTurnDayReferences, weekdayMismatchNotice } from './day-reference-guard.ts';
+import {
+  resolveAnsweredQuestionContext,
+  resolveTurnDayReferences,
+  weekdayMismatchNotice,
+} from './day-reference-guard.ts';
 import {
   describeWeekdayDateMismatches,
   findWeekdayDateMismatches,
@@ -589,6 +593,28 @@ interface ZodObjectShape {
   shape: { [key: string]: ZodShapeField };
 }
 
+/** Prior mutation results from this actor's validated tool history, not assistant prose. */
+function earlierMutationResults(ctx: AgentContext, history: ChatHistoryMessage[], originId: number): string[] {
+  const names = new Map<string, string>();
+  const results: string[] = [];
+  for (const row of history) {
+    if (row.id < originId || row.user_id !== ctx.user.telegram_id) continue;
+    for (const message of parseHistoryRow(row, ctx.user.timezone)) {
+      if (message.role === 'assistant') {
+        for (const call of message.tool_calls ?? []) {
+          names.delete(call.id);
+          if (call.type === 'function' && WRITE_TOOLS.has(call.function.name)) names.set(call.id, call.function.name);
+        }
+      } else if (message.role === 'tool' && typeof message.content === 'string') {
+        const name = names.get(message.tool_call_id);
+        names.delete(message.tool_call_id);
+        if (name) results.push(`[${name}] ${message.content}`);
+      }
+    }
+  }
+  return results;
+}
+
 /** True when the schema's `.shape` exposes a field for `key` that accepts `null`. */
 function fieldSchemaAcceptsNull(schema: z.ZodType | undefined, key: string): boolean {
   if (!schema || !('shape' in schema)) return false;
@@ -711,10 +737,15 @@ export class CalendarBotAgent {
     // IMPORTANT: history must already contain the current user message.
     // The chat-logging middleware (bot/middleware/chat-logging.ts) saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    const systemPrompt = buildSystemPrompt(ctx);
-
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 50) : history;
+
+    const confirmationContext = resolveAnsweredQuestionContext(ctx.messageText, relevantHistory, ctx.user.telegram_id);
+    const systemPrompt =
+      buildSystemPrompt(ctx) +
+      (confirmationContext
+        ? '\n\nThe current answer addresses the specific ask_user question in history. Keep every independent request from the originating user message, including requests separated by casual conversation. Complete or clarify remaining requested work without asking the user to repeat it. The selected option is not blanket approval for other ambiguous writes. Preserve actual completed actions; never replay them to repair an explanation.'
+        : '');
 
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
@@ -1100,6 +1131,7 @@ export class CalendarBotAgent {
       // A bare "Да" answers the ask_user of the conversation it was saved to: the group's own.
       const turnHistory =
         ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
+      const answeredQuestion = resolveAnsweredQuestionContext(ctx.messageText, turnHistory, ctx.user.telegram_id);
       ctx.dayReferences = resolveTurnDayReferences(ctx.messageText, turnHistory, new Date(), ctx.user.timezone);
       const { systemPrompt, messages: rawHistoryMessages } = await waitForAbort(
         () => this.buildMessages(ctx, history, summaryStream, requestSignal),
@@ -1360,6 +1392,10 @@ export class CalendarBotAgent {
       const finalProse = pendingResponseText.trim();
       const proseEvidence = {
         userMessage: ctx.messageText,
+        answeredQuestion: answeredQuestion ?? undefined,
+        earlierMutationResults: answeredQuestion
+          ? earlierMutationResults(ctx, turnHistory, answeredQuestion.originHistoryId)
+          : [],
         timezone: ctx.user.timezone,
         tools: toolEvidence,
         response: finalProse,
@@ -1556,7 +1592,16 @@ export class CalendarBotAgent {
       if (termination === 'waiting' && writeOutcomes.speechQuestion) {
         this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
-      if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      if (evidence) {
+        // A deterministic receipt must not hide the ask_user handoff from the next answer.
+        if (termination === 'waiting')
+          ctx.conversationLogger.logBotResponse(
+            ctx.user.telegram_id,
+            evidence,
+            ctx.isGroup ? ctx.groupChatId : undefined,
+          );
+        else this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      }
       if (unansweredNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: unansweredNotice });
       // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
       if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
