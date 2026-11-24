@@ -1,5 +1,6 @@
 // Boundary and failure contracts for lossless delivery, without Telegram requests.
 import { expect, test } from 'bun:test';
+import { TelegramError } from 'gramio';
 import { planAgendaRaster, sendAgendaImage } from '../../src/utils/agenda-image.ts';
 import { png } from '../fixtures/png.ts';
 
@@ -24,7 +25,7 @@ for (const [width, height, bytes, mode] of [
       },
       sendDocument: async (actual, options) => {
         expect(actual).toBe(file);
-        expect(options.caption).toContain('lossless');
+        expect(options.caption).toContain('exceeds Telegram photo limits');
         calls.push('document');
         return 42;
       },
@@ -55,6 +56,89 @@ test('missing document capability and rejected document cannot report success', 
       },
     }),
   ).rejects.toThrow('API rejected');
+});
+
+const telegram400 = (description: string) =>
+  new TelegramError({ ok: false, error_code: 400, description }, 'sendPhoto', { chat_id: 1, photo: 'photo' });
+
+for (const description of ['Bad Request: IMAGE_PROCESS_FAILED', 'Bad Request: PHOTO_INVALID_DIMENSIONS']) {
+  for (const [language, caption] of [
+    ['en', 'could not process this agenda as a photo'],
+    ['ru', 'не смог обработать это расписание как фото'],
+  ] as const) {
+    test(`${language}: a photo Telegram refuses (${description}) goes out as the same PNG document`, async () => {
+      const file = new File([png(1080, 1335)], 'agenda.png', { type: 'image/png' });
+      const calls: string[] = [];
+      const result = await sendAgendaImage(file, {
+        language,
+        sendPhoto: async () => {
+          calls.push('photo');
+          throw telegram400(description);
+        },
+        sendDocument: async (actual, options) => {
+          expect(actual).toBe(file);
+          expect(options.caption).toContain(caption);
+          calls.push('document');
+          return 7;
+        },
+      });
+      expect(result).toBe(7);
+      expect(calls).toEqual(['photo', 'document']);
+    });
+  }
+}
+
+test('a refused photo is not retried when the error is not Telegram 400 with a photo-processing reason', async () => {
+  const file = new File([png(1080, 1335)], 'agenda.png', { type: 'image/png' });
+  const errors = [
+    new Error('sendPhoto: Bad Request: IMAGE_PROCESS_FAILED'), // text alone says nothing about the outcome
+    new TelegramError({ ok: false, error_code: 429, description: 'Too Many Requests: retry after 5' }, 'sendPhoto', {
+      chat_id: 1,
+      photo: 'photo',
+    }),
+    telegram400('Bad Request: chat not found'),
+  ];
+  for (const error of errors) {
+    const calls: string[] = [];
+    await expect(
+      sendAgendaImage(file, {
+        sendPhoto: async () => {
+          calls.push('photo');
+          throw error;
+        },
+        sendDocument: async () => {
+          calls.push('document');
+          return 1;
+        },
+      }),
+    ).rejects.toBe(error);
+    expect(calls).toEqual(['photo']);
+  }
+});
+
+test('a refused photo without a document sender propagates the 400', async () => {
+  const file = new File([png(1080, 1335)], 'agenda.png', { type: 'image/png' });
+  await expect(
+    sendAgendaImage(file, {
+      sendPhoto: async () => {
+        throw telegram400('Bad Request: IMAGE_PROCESS_FAILED');
+      },
+    }),
+  ).rejects.toThrow('IMAGE_PROCESS_FAILED');
+});
+
+test('a document that fails after a refused photo surfaces its own error', async () => {
+  const file = new File([png(1080, 1335)], 'agenda.png', { type: 'image/png' });
+  await expect(
+    sendAgendaImage(file, {
+      sendPhoto: async () => {
+        throw telegram400('Bad Request: IMAGE_PROCESS_FAILED');
+      },
+      sendDocument: async () => {
+        throw new Error('document rejected');
+      },
+    }),
+  ).rejects.toThrow('document rejected');
 });
 
 test('large layouts keep every CSS pixel without a multi-hundred-megabyte raster', () => {
