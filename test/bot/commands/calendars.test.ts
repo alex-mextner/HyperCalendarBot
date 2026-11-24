@@ -4,6 +4,7 @@ import { InlineKeyboard } from 'gramio';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../../../src/bot/commands/calendars.ts';
 import { CB } from '../../../src/config/constants.ts';
 import type { GoogleCalendar } from '../../../src/database/types.ts';
+import { mockCtx } from '../../helpers/mock-context.ts';
 
 function makeCalendar(overrides: Partial<GoogleCalendar> = {}): GoogleCalendar {
   return {
@@ -106,10 +107,7 @@ describe('buildCalendarPickerKeyboard', () => {
 
 describe('handleCalendarPickerCallback', () => {
   function makeCtx() {
-    return {
-      answer: mock(() => Promise.resolve()),
-      editText: mock(() => Promise.resolve()),
-    };
+    return mockCtx();
   }
 
   function makeCalendarRepo(calendars: GoogleCalendar[] = []) {

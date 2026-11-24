@@ -27,14 +27,6 @@ export const RATE_LIMIT = {
   AI_PER_HOUR: 60,
 } as const;
 
-// Defaults
-export const DEFAULTS = {
-  LANGUAGE: 'en' as const,
-  TIMEZONE: 'UTC',
-  REMINDER_MINUTES: 15,
-  WEEK_STARTS_ON: 1 as const, // Monday
-} as const;
-
 // Callback data prefixes
 export const CB = {
   EVENT_VIEW: 'ev',

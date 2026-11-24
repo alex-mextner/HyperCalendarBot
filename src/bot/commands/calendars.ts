@@ -22,7 +22,7 @@ export function buildCalendarPickerKeyboard(calendars: GoogleCalendar[], lang: L
 }
 
 export async function showCalendarPicker(
-  ctx: BotCommandContext,
+  ctx: Pick<BotCommandContext, 'send'>,
   calendarRepo: GoogleCalendarRepository,
   userId: number,
   lang: Lang,

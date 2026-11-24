@@ -1,5 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { InlineKeyboard } from 'gramio';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { t } from '../../../src/config/constants.ts';
+import type { GoogleCalendar } from '../../../src/database/types.ts';
 import { png } from '../../fixtures/png.ts';
 
 function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
@@ -280,6 +283,46 @@ describe('HOLIDAYS callback', () => {
 // ── GCAL ──
 
 describe('GCAL callback', () => {
+  test('gcal cal open acknowledges before sending the real calendar picker', async () => {
+    const calendars: GoogleCalendar[] = [
+      {
+        id: 7,
+        user_id: 100,
+        google_calendar_id: 'synthetic-calendar@example.invalid',
+        calendar_name: 'Synthetic Work',
+        color: null,
+        is_primary: 1,
+        sync_enabled: 1,
+        access_role: 'owner',
+        sync_token: null,
+        last_synced_at: null,
+        created_at: '2030-01-01T00:00:00Z',
+        updated_at: '2030-01-01T00:00:00Z',
+      },
+    ];
+    const calendarRepo = { getCalendars: mock(() => calendars) };
+    const operations: string[] = [];
+    const answer = mock(async () => {
+      operations.push('answer');
+    });
+    const send = mock(async (_text: string, _options: { reply_markup: InlineKeyboard }) => {
+      operations.push('send');
+    });
+    const ctx = { ...makeCtx('gc:cal:open'), answer, send };
+    await makeHandler({ calendarRepo })(ctx as never);
+
+    expect(calendarRepo.getCalendars).toHaveBeenCalledWith(100);
+    expect(operations).toEqual(['answer', 'send']);
+    expect(answer).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const sent = send.mock.calls[0]!;
+    expect(sent[0]).toBe(t('en').gcal_calendar_picker);
+    expect(sent[1].reply_markup).toBeInstanceOf(InlineKeyboard);
+    const buttons = sent[1].reply_markup.toJSON().inline_keyboard.flat();
+    expect(buttons).toContainEqual({ text: '✅ 📅 Synthetic Work ★', callback_data: 'gc:cal:7' });
+    expect(buttons).toContainEqual({ text: t('en').gcal_calendar_done, callback_data: 'gc:cal:done' });
+  });
+
   test('gcal cal done sub-action delegates to handleCalendarPickerCallback', async () => {
     const calendarRepo = {
       getCalendars: mock(() => []),

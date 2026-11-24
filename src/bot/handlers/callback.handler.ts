@@ -77,7 +77,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { escapeHtml, formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
+import { handleCalendarPickerCallback, showCalendarPicker } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
@@ -562,10 +562,8 @@ export function createCallbackHandler(
     }
     if (subAction === 'cal' && calendarRepo) {
       if (subPayload === 'open') {
-        const calendars = calendarRepo.getCalendars(user.telegram_id);
-        const keyboard = buildCalendarPickerKeyboard(calendars, lang);
         await ctx.answer();
-        await ctx.send(t(lang).gcal_calendar_picker, { reply_markup: keyboard });
+        await showCalendarPicker(ctx, calendarRepo, user.telegram_id, lang);
         return;
       }
       await handleCalendarPickerCallback(ctx, calendarRepo, user.telegram_id, subPayload, lang, onCalendarsDone);

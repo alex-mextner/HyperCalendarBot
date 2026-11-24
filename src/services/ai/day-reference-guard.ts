@@ -117,6 +117,42 @@ function answersQuestion(messageText: string, options: readonly string[]): boole
   return words.length > 0 && words.every((word) => CONFIRMATIONS[word] === true);
 }
 
+/** The original request and the specific question a saved option/confirmation answers. */
+export interface AnsweredQuestionContext {
+  originHistoryId: number;
+  originalRequest: string;
+  question: string;
+  earlierAnswers: { question: string; answer: string }[];
+}
+
+/** Reuse the validated question chain; a new topic or another actor never inherits it. */
+export function resolveAnsweredQuestionContext(
+  messageText: string,
+  history: ChatHistoryMessage[],
+  actorId: number,
+): AnsweredQuestionContext | null {
+  const newestUser = history.findLast((row) => row.role === 'user');
+  const pending = pendingQuestion(messageText, history);
+  if (
+    !pending ||
+    newestUser?.user_id !== actorId ||
+    pending.origin.user_id !== actorId ||
+    !answersQuestion(messageText, pending.options)
+  )
+    return null;
+  const earlierAnswers: AnsweredQuestionContext['earlierAnswers'] = [];
+  let origin = pending.origin;
+  let earlier = history.slice(0, history.findIndex((row) => row.id === origin.id) + 1);
+  for (;;) {
+    const previous = pendingQuestion(origin.content, earlier);
+    if (!previous || previous.origin.user_id !== actorId || !answersQuestion(origin.content, previous.options)) break;
+    earlierAnswers.unshift({ question: previous.question, answer: origin.content });
+    origin = previous.origin;
+    earlier = earlier.slice(0, earlier.findIndex((row) => row.id === origin.id) + 1);
+  }
+  return { originHistoryId: origin.id, originalRequest: origin.content, question: pending.question, earlierAnswers };
+}
+
 /** The text an assistant row showed the user; empty for a tool-call turn or another activity. */
 function assistantText(content: string): string {
   const sent = BotMessageCodec.safeParse(content);

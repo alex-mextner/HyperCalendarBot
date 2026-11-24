@@ -1,9 +1,15 @@
 // src/utils/logger.ts
+import { createRequire } from 'node:module';
 import pino from 'pino';
+
+const require = createRequire(import.meta.url);
 
 export const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty', options: { colorize: true } } : undefined,
+  transport:
+    process.env.NODE_ENV !== 'production'
+      ? { target: require.resolve('pino-pretty'), options: { colorize: true } }
+      : undefined,
 });
 
 export const botLogger = logger.child({ module: 'bot' });
